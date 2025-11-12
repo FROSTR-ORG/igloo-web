@@ -5,15 +5,15 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
 const iconButtonVariants = cva(
-  'inline-flex items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50',
+  'inline-flex items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50',
   {
     variants: {
       variant: {
-        default: 'bg-blue-600/80 text-blue-50 hover:bg-blue-500/80',
-        ghost: 'text-blue-400 hover:text-blue-200 hover:bg-blue-900/30',
-        destructive: 'text-red-400 hover:text-red-200 hover:bg-red-900/30',
-        success: 'text-emerald-400 hover:text-emerald-200 hover:bg-emerald-900/30',
-        outline: 'border border-blue-900/40 text-blue-200 hover:border-blue-400/70 hover:text-blue-50'
+        default: 'bg-primary/85 text-primary-foreground hover:bg-primary/75',
+        ghost: 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+        destructive: 'text-destructive hover:bg-destructive/20 hover:text-destructive',
+        success: 'text-success hover:bg-success/20 hover:text-success-foreground',
+        outline: 'border border-border text-foreground hover:bg-accent'
       },
       size: {
         default: 'h-8 w-8',
@@ -22,7 +22,7 @@ const iconButtonVariants = cva(
       }
     },
     defaultVariants: {
-      variant: 'default',
+      variant: 'ghost',
       size: 'default'
     }
   }
