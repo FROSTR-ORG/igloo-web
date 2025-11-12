@@ -16,6 +16,8 @@ import {
   SignalZero,
   Users
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
 
 const shareSummary = {
   name: 'Vault A · Signer 03',
@@ -135,9 +137,13 @@ const CredentialField = ({ label, value, expanded, onToggle, decoded, status }: 
             <CheckCircle2 className="h-3.5 w-3.5" /> Validated
           </span>
         )}
-        <span title="Match the credential exported from Igloo Desktop">
-          <HelpCircle className="h-4 w-4 cursor-help text-blue-400" />
-        </span>
+        <IconButton
+          variant="ghost"
+          size="sm"
+          icon={<HelpCircle className="h-4 w-4" />}
+          tooltip="Match the credential exported from Igloo Desktop"
+          className="text-blue-400 hover:text-blue-200"
+        />
       </div>
     </div>
     <textarea
@@ -147,17 +153,20 @@ const CredentialField = ({ label, value, expanded, onToggle, decoded, status }: 
       className="w-full rounded-lg border border-blue-900/40 bg-gray-900/40 p-3 text-sm font-mono text-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
     />
     <div className="flex gap-2 text-xs">
-      <button type="button" className="igloo-button inline-flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2">
-        <Copy className="h-3.5 w-3.5" /> Copy
-      </button>
-      <button
+      <Button variant="secondary" size="sm" className="flex-1 justify-center">
+        <Copy className="h-3.5 w-3.5" />
+        Copy
+      </Button>
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         onClick={onToggle}
-        className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-blue-900/40 px-3 py-2 text-blue-200 hover:border-blue-400/70 hover:text-blue-50"
+        className="flex-1 justify-center uppercase tracking-[0.2em] text-blue-200"
       >
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         Decoded
-      </button>
+      </Button>
     </div>
     {expanded && (
       <pre className="rounded-lg border border-blue-900/40 bg-black/40 p-3 text-[11px] font-mono leading-relaxed text-blue-100">
@@ -189,9 +198,13 @@ function App() {
 
         <div className="flex items-center gap-2 text-blue-200">
           <h2 className="text-lg font-semibold text-blue-300">Start your signer to handle requests</h2>
-          <span title="The signer must stay online to accept signature and ECDH requests.">
-            <HelpCircle className="h-4 w-4 text-blue-400" />
-          </span>
+          <IconButton
+            variant="ghost"
+            size="sm"
+            icon={<HelpCircle className="h-4 w-4" />}
+            tooltip="The signer must stay online to accept signature and ECDH requests."
+            className="text-blue-400 hover:text-blue-200"
+          />
         </div>
 
         <div className="rounded-xl border border-blue-900/30 bg-gray-900/40 p-5 shadow-lg">
@@ -248,26 +261,27 @@ function App() {
               </div>
             </div>
             <div className="flex gap-3">
-              <button
+              <Button
                 type="button"
                 onClick={() => setIsSignerRunning((prev) => !prev)}
+                size="lg"
                 className={clsx(
-                  'inline-flex items-center justify-center gap-2 rounded-lg px-6 py-3 text-sm font-semibold shadow-lg transition-colors',
-                  isSignerRunning
-                    ? 'bg-rose-500/90 text-slate-950 hover:bg-rose-400'
-                    : 'bg-emerald-500/90 text-slate-950 hover:bg-emerald-400'
+                  'inline-flex min-w-[180px] items-center justify-center gap-2 rounded-lg px-6 py-3 text-sm font-semibold shadow-lg transition-colors',
+                  isSignerRunning ? 'bg-red-600 text-blue-50 hover:bg-red-500' : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400'
                 )}
               >
                 {isSignerRunning ? <PauseCircle className="h-5 w-5" /> : <PlayCircle className="h-5 w-5" />}
                 {isSignerRunning ? 'Stop signer' : 'Start signer'}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-900/40 bg-blue-900/10 px-5 py-3 text-sm text-blue-100 hover:border-blue-400/60"
+                variant="outline"
+                size="lg"
+                className="inline-flex items-center justify-center gap-2 border-blue-900/40 bg-blue-900/10 px-5 py-3 text-blue-100 hover:border-blue-400/60"
               >
                 <Radio className="h-5 w-5 text-cyan-300" />
                 Test keep-alive
-              </button>
+              </Button>
             </div>
           </div>
         </SectionCard>
@@ -291,7 +305,9 @@ function App() {
                     <StatusDot state={relay.state} />
                     {relay.state}
                   </span>
-                  <button className="rounded-full border border-blue-900/40 px-3 py-1 text-blue-200 hover:text-blue-50">Remove</button>
+                  <Button variant="outline" size="sm" className="rounded-full border px-3 py-1 text-blue-200 hover:text-blue-50">
+                    Remove
+                  </Button>
                 </div>
               </div>
             ))}
@@ -350,7 +366,9 @@ function App() {
             </div>
             <div className="mt-4 flex items-center justify-between text-xs text-blue-200/70">
               <span>Auto-prune after 200 entries</span>
-              <button className="text-blue-400 hover:text-blue-200">Clear log</button>
+              <Button variant="link" size="sm" className="text-blue-400 hover:text-blue-200">
+                Clear log
+              </Button>
             </div>
           </SectionCard>
         </div>
