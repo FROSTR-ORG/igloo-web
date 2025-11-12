@@ -6,6 +6,7 @@
 
 @layer base {
   :root {
+    /* Light theme (unused by default, present for completeness) */
     --background: 0 0% 100%;
     --foreground: 222.2 47.4% 11.2%;
 
@@ -21,52 +22,66 @@
     --card: 0 0% 100%;
     --card-foreground: 222.2 47.4% 11.2%;
 
-    --primary: 222.2 47.4% 11.2%;
+    --primary: 216 92% 60%; /* brand blue */
     --primary-foreground: 210 40% 98%;
 
-    --secondary: 210 40% 96.1%;
+    --secondary: 220 14% 96%;
     --secondary-foreground: 222.2 47.4% 11.2%;
 
-    --accent: 210 40% 96.1%;
+    --accent: 220 14% 96%;
     --accent-foreground: 222.2 47.4% 11.2%;
 
-    --destructive: 0 100% 50%;
+    --destructive: 0 72% 51%;
     --destructive-foreground: 210 40% 98%;
 
-    --ring: 215 20.2% 65.1%;
+    --success: 152 76% 40%;
+    --success-foreground: 152 89% 96%;
 
-    --radius: 0.5rem;
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 100% 96%;
+
+    --ring: 216 92% 60%;
+
+    --radius: 0.75rem; /* slightly rounder like desktop */
   }
 
   .dark {
+    /* Igloo Desktop permanent-dark palette */
     --background: 222 84% 4.9%;
     --foreground: 210 40% 98%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
 
     --popover: 222 84% 4.9%;
     --popover-foreground: 210 40% 98%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
 
-    --card: 222 84% 4.9%;
+    /* Slightly lifted glassy card surface */
+    --card: 220 40% 10%;
     --card-foreground: 210 40% 98%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 84% 4.9%;
+    --primary: 216 92% 60%;
+    --primary-foreground: 222 84% 5%;
 
-    --secondary: 217.2 32.6% 17.5%;
+    --secondary: 221 40% 14%;
     --secondary-foreground: 210 40% 98%;
 
-    --accent: 217.2 32.6% 17.5%;
+    --accent: 221 40% 14%;
     --accent-foreground: 210 40% 98%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 352 83% 55%;
+    --destructive-foreground: 0 0% 100%;
 
-    --ring: 217.2 32.6% 17.5%;
+    --success: 152 76% 40%;
+    --success-foreground: 152 89% 96%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 100% 96%;
+
+    --ring: 216 92% 60%;
   }
 }
 
@@ -76,12 +91,14 @@
   }
 
   body {
-    @apply min-h-screen bg-gray-900 text-foreground font-sharetech antialiased;
+    @apply min-h-screen text-foreground font-sharetech antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
+    /* igloo gradient glow */
+    background-color: hsl(var(--background));
     background-image:
-      radial-gradient(circle at 20% 20%, rgba(59,130,246,0.35), rgba(4,7,15,0)),
-      radial-gradient(circle at 80% 0%, rgba(56,189,248,0.25), rgba(4,7,15,0)),
-      radial-gradient(circle at 10% 90%, rgba(76,29,149,0.25), rgba(4,7,15,0));
+      radial-gradient(circle at 20% 20%, rgba(59,130,246,0.30), rgba(4,7,15,0)),
+      radial-gradient(circle at 80% 0%, rgba(56,189,248,0.18), rgba(4,7,15,0)),
+      radial-gradient(circle at 10% 90%, rgba(76,29,149,0.18), rgba(4,7,15,0));
     @apply dark;
   }
 
@@ -92,22 +109,22 @@
 
 @layer components {
   .igloo-card {
-    @apply bg-gray-900/50 border border-blue-900/30 rounded-lg backdrop-blur shadow-lg;
+    @apply rounded-xl border border-blue-900/30 bg-gray-900/45 backdrop-blur shadow-[0_20px_40px_rgba(2,6,23,0.6)];
   }
 
   .igloo-button {
-    @apply bg-blue-600 hover:bg-blue-700 text-blue-100 transition-colors;
+    @apply bg-primary text-primary-foreground hover:bg-primary/90 transition-colors;
   }
 
   .igloo-button-ghost {
-    @apply text-blue-400 hover:text-blue-300 hover:bg-blue-900/30 transition-colors;
+    @apply text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors;
   }
 
   .igloo-text-primary {
-    @apply text-blue-300;
+    @apply text-blue-300; /* legacy helper; prefer tokens */
   }
 
   .igloo-text-secondary {
-    @apply text-blue-400;
+    @apply text-blue-400; /* legacy helper; prefer tokens */
   }
 }

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
+import { Textarea } from '@/components/ui/textarea';
 
 const shareSummary = {
   name: 'Vault A · Signer 03',
@@ -104,7 +105,7 @@ type SectionCardProps = {
 };
 
 const SectionCard = ({ title, description, action, children }: SectionCardProps) => (
-  <section className="rounded-xl border border-blue-900/30 bg-gray-900/40 p-6 shadow-[0_20px_40px_rgba(2,6,23,0.6)]">
+  <section className="igloo-card p-6">
     {(title || description || action) && (
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -146,12 +147,7 @@ const CredentialField = ({ label, value, expanded, onToggle, decoded, status }: 
         />
       </div>
     </div>
-    <textarea
-      readOnly
-      value={value}
-      rows={3}
-      className="w-full rounded-lg border border-blue-900/40 bg-gray-900/40 p-3 text-sm font-mono text-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-    />
+    <Textarea readOnly value={value} rows={3} />
     <div className="flex gap-2 text-xs">
       <Button variant="secondary" size="sm" className="flex-1 justify-center">
         <Copy className="h-3.5 w-3.5" />
@@ -207,7 +203,7 @@ function App() {
           />
         </div>
 
-        <div className="rounded-xl border border-blue-900/30 bg-gray-900/40 p-5 shadow-lg">
+        <div className="igloo-card p-5">
           <div className="flex flex-wrap items-center gap-3 text-sm text-blue-200/80">
             <Users className="h-5 w-5 text-blue-400" />
             <span className="font-medium text-blue-100">{shareSummary.name}</span>
@@ -265,20 +261,13 @@ function App() {
                 type="button"
                 onClick={() => setIsSignerRunning((prev) => !prev)}
                 size="lg"
-                className={clsx(
-                  'inline-flex min-w-[180px] items-center justify-center gap-2 rounded-lg px-6 py-3 text-sm font-semibold shadow-lg transition-colors',
-                  isSignerRunning ? 'bg-red-600 text-blue-50 hover:bg-red-500' : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400'
-                )}
+                variant={isSignerRunning ? 'destructive' : 'success'}
+                className="inline-flex min-w-[180px] items-center justify-center gap-2 shadow-lg"
               >
                 {isSignerRunning ? <PauseCircle className="h-5 w-5" /> : <PlayCircle className="h-5 w-5" />}
                 {isSignerRunning ? 'Stop signer' : 'Start signer'}
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="lg"
-                className="inline-flex items-center justify-center gap-2 border-blue-900/40 bg-blue-900/10 px-5 py-3 text-blue-100 hover:border-blue-400/60"
-              >
+              <Button type="button" variant="outline" size="lg" className="inline-flex items-center justify-center gap-2 px-5 py-3">
                 <Radio className="h-5 w-5 text-cyan-300" />
                 Test keep-alive
               </Button>
