@@ -10,13 +10,17 @@
   },
   "dependencies": {
     "@fontsource/share-tech-mono": "^5.0.8",
+    "@frostr/bifrost": "^1.0.7",
+    "@frostr/igloo-core": "^0.2.4",
     "@radix-ui/react-slot": "^1.2.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.453.0",
+    "nostr-tools": "^2.17.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tailwind-merge": "^3.4.0"
+    "tailwind-merge": "^3.4.0",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
