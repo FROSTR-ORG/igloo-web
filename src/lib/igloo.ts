@@ -5,6 +5,7 @@ import {
   decodeShare,
   extractSelfPubkeyFromCredentials,
   normalizePubkey,
+  pingPeer,
   pingPeersAdvanced,
   type BifrostNode,
   type GroupPackage,
@@ -162,10 +163,14 @@ export function buildPeerList(group: string, share: string): PeerPolicy[] {
 export async function refreshPeerStatuses(node: BifrostNode, group: string, share: string, peers: PeerPolicy[]): Promise<PeerPolicy[]> {
   try {
     const peerList = peers.length ? peers : buildPeerList(group, share);
-    const pubkeys = peerList.map((peer) => peer.pubkey);
+    // Normalize pubkeys (remove 02/03 prefix) to match node's internal peer format
+    const pubkeys = peerList.map((peer) => safeNormalize(peer.pubkey));
+    console.log('[RefreshPeers] Pinging pubkeys (normalized):', pubkeys);
     if (!pubkeys.length) return peerList;
 
-    const results = await pingPeersAdvanced(node, pubkeys);
+    const results = await pingPeersAdvanced(node, pubkeys, { timeout: 10000 });
+    console.log('[RefreshPeers] Results:', results);
+
     return peerList.map((peer) => {
       const normalizedPeer = safeNormalize(peer.pubkey);
       const status = results.find((entry) => safeNormalize(entry.pubkey) === normalizedPeer);
@@ -176,8 +181,37 @@ export async function refreshPeerStatuses(node: BifrostNode, group: string, shar
       };
     });
   } catch (error) {
-    console.warn('Failed to refresh peer status', error);
+    console.warn('[RefreshPeers] Failed to refresh peer status', error);
     return peers;
+  }
+}
+
+export type PingResult = {
+  success: boolean;
+  latency?: number;
+  error?: string;
+};
+
+export async function pingSinglePeer(node: BifrostNode, pubkey: string): Promise<PingResult> {
+  try {
+    // Normalize pubkey (remove 02/03 prefix) to match node's internal peer format
+    const normalized = safeNormalize(pubkey);
+    console.log('[Ping] Attempting ping to:', { original: pubkey, normalized });
+
+    const result = await pingPeer(node, normalized, { timeout: 10000 });
+    console.log('[Ping] Result:', result);
+
+    return {
+      success: result.success,
+      latency: result.latency,
+      error: result.error
+    };
+  } catch (error) {
+    console.error('[Ping] Error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Ping failed'
+    };
   }
 }
 

@@ -27,15 +27,19 @@ export default function UnlockPage() {
   }
 
   return (
-    <PageLayout header={<AppHeader subtitle="Welcome Back" title="Unlock" />}>      
+    <PageLayout header={<AppHeader subtitle="Web Signer" title="Igloo" />}>
       <ContentCard title="Unlock Saved Share" description="Enter your password to decrypt the saved credentials in this browser.">
         <form onSubmit={onUnlock} className="space-y-5">
           <div className="space-y-2 max-w-sm">
-            <Label>Password</Label>
+            <Label className="text-sm text-blue-300">Password</Label>
             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter password" required />
           </div>
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          <div className="flex justify-end gap-2">
+          {error && (
+            <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+              {error}
+            </div>
+          )}
+          <div className="flex justify-end">
             <Button type="submit" className="min-w-[140px]">{loading ? 'Unlocking…' : 'Unlock'}</Button>
           </div>
         </form>

@@ -7,7 +7,14 @@ export type StoredShare = {
   relays: string[];
 };
 
+export type StoredPeerPolicy = {
+  pubkey: string;
+  send: boolean;
+  receive: boolean;
+};
+
 const STORAGE_KEY = 'igloo.vault';
+const POLICIES_KEY = 'igloo.policies';
 
 export function hasStoredShare(): boolean {
   return !!localStorage.getItem(STORAGE_KEY);
@@ -30,4 +37,23 @@ export async function loadStoredShare(password: string): Promise<StoredShare> {
 
 export function clearStoredShare() {
   localStorage.removeItem(STORAGE_KEY);
+}
+
+// Peer policies (not encrypted - just pubkey + allow/deny flags)
+export function loadPeerPolicies(): StoredPeerPolicy[] {
+  try {
+    const raw = localStorage.getItem(POLICIES_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as StoredPeerPolicy[];
+  } catch {
+    return [];
+  }
+}
+
+export function savePeerPolicies(policies: StoredPeerPolicy[]): void {
+  localStorage.setItem(POLICIES_KEY, JSON.stringify(policies));
+}
+
+export function clearPeerPolicies(): void {
+  localStorage.removeItem(POLICIES_KEY);
 }
