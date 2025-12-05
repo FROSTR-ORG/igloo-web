@@ -109,22 +109,51 @@
 
 @layer components {
   .igloo-card {
-    @apply rounded-xl border border-blue-900/30 bg-gray-900/45 backdrop-blur shadow-[0_20px_40px_rgba(2,6,23,0.6)];
+    @apply rounded-lg border border-blue-900/30 bg-gray-900/40 backdrop-blur-sm shadow-lg;
   }
 
   .igloo-button {
-    @apply bg-primary text-primary-foreground hover:bg-primary/90 transition-colors;
+    @apply bg-blue-600 hover:bg-blue-700 text-blue-100 transition-colors;
   }
 
   .igloo-button-ghost {
-    @apply text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors;
+    @apply text-blue-400 hover:text-blue-300 hover:bg-blue-900/30 transition-colors;
   }
 
   .igloo-text-primary {
-    @apply text-blue-300; /* legacy helper; prefer tokens */
+    @apply text-blue-300;
   }
 
   .igloo-text-secondary {
-    @apply text-blue-400; /* legacy helper; prefer tokens */
+    @apply text-blue-400;
+  }
+
+  .igloo-text-muted {
+    @apply text-gray-400;
+  }
+
+  /* Status badge variants */
+  .igloo-badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset;
+  }
+
+  .igloo-badge-default {
+    @apply bg-gray-500/20 text-gray-400 ring-gray-500/30;
+  }
+
+  .igloo-badge-success {
+    @apply bg-green-500/20 text-green-400 ring-green-500/30;
+  }
+
+  .igloo-badge-error {
+    @apply bg-red-500/20 text-red-400 ring-red-500/30;
+  }
+
+  .igloo-badge-warning {
+    @apply bg-yellow-500/20 text-yellow-400 ring-yellow-500/30;
+  }
+
+  .igloo-badge-info {
+    @apply bg-blue-500/20 text-blue-400 ring-blue-500/30;
   }
 }
