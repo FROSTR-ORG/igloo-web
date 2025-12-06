@@ -5,6 +5,7 @@ export type StoredShare = {
   group: string;
   share: string;
   relays: string[];
+  keysetName?: string;
 };
 
 export type StoredPeerPolicy = {
