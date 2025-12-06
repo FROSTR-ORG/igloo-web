@@ -34,10 +34,10 @@ export function RelayInput({ relays, onChange }: RelayInputProps) {
     setError(null);
   }
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="flex gap-2">
-        <Input placeholder="wss://relay.example" value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
-        <IconButton variant="outline" size="lg" icon={<Plus className="h-4 w-4" />} onClick={add} tooltip="Add relay" />
+        <Input placeholder="wss://relay.example" value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} className="font-mono text-sm" />
+        <IconButton variant="outline" size="default" icon={<Plus className="h-4 w-4" />} onClick={add} tooltip="Add" />
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
     </div>

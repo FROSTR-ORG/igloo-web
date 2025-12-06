@@ -137,10 +137,24 @@ export async function startSignerNode(config: { group: string; share: string; re
 
 export function stopSignerNode(node: BifrostNode | null) {
   if (!node) return;
+
+  // Temporarily suppress the expected igloo-core warning about removeAllListeners
+  // This warning is harmless - the BifrostNode EventEmitter doesn't expose
+  // removeAllListeners, but manual cleanup via off/removeListener still works
+  const originalWarn = console.warn;
+  console.warn = (message: unknown, ...args: unknown[]) => {
+    if (typeof message === 'string' && message.includes('removeAllListeners not available')) {
+      return; // Skip this expected warning
+    }
+    originalWarn(message, ...args);
+  };
+
   try {
     cleanupBifrostNode(node);
   } catch (error) {
-    console.warn('Failed to cleanup node', error);
+    originalWarn('Failed to cleanup node', error);
+  } finally {
+    console.warn = originalWarn;
   }
 }
 

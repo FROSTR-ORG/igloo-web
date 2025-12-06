@@ -1,30 +1,21 @@
 import * as React from 'react';
 import { PageLayout } from '@/components/ui/page-layout';
 import { AppHeader } from '@/components/ui/app-header';
-import { ContentCard } from '@/components/ui/content-card';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
-import { Textarea } from '@/components/ui/textarea';
-import { RelayInput } from '@/components/ui/relay-input';
+import { Input } from '@/components/ui/input';
 import { PeerList, type PeerPolicy } from '@/components/ui/peer-list';
 import { EventLog, type LogEntry } from '@/components/ui/event-log';
-import { StatusDot, StatusBadge, type StatusState } from '@/components/ui/status-indicator';
+import { type StatusState } from '@/components/ui/status-indicator';
 import {
-  Activity,
-  CheckCircle2,
+  Check,
   ChevronDown,
   ChevronRight,
   Copy,
-  Eye,
-  EyeOff,
   HelpCircle,
-  PauseCircle,
-  PlayCircle,
-  Radio,
-  SignalHigh,
-  SignalMedium,
-  SignalZero,
-  Users
+  Plus,
+  User,
+  X
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import {
@@ -43,20 +34,11 @@ import { loadPeerPolicies, savePeerPolicies } from '@/lib/storage';
 
 const MAX_LOGS = 200;
 
-type RelayState = {
-  url: string;
-  latency: string;
-  sync: string;
-  state: StatusState;
-};
-
 const EVENT_LABELS: Record<string, { level: string; message: string }> = {
   ready: { level: 'READY', message: 'Node is ready' },
   closed: { level: 'INFO', message: 'Node closed connection' },
   error: { level: 'ERROR', message: 'Node error' }
 };
-
-const formatPubkey = (value: string) => `${value.slice(0, 10)}…${value.slice(-6)}`;
 
 // Merge extracted peers with saved policies
 function initializePeers(group: string, share: string): PeerPolicy[] {
@@ -75,7 +57,9 @@ function initializePeers(group: string, share: string): PeerPolicy[] {
 export default function SignerPage() {
   const { share, logout } = useStore();
   const [expanded, setExpanded] = React.useState({ group: false, share: false });
+  const [copiedStates, setCopiedStates] = React.useState({ group: false, share: false });
   const [relays, setRelays] = React.useState<string[]>(share?.relays?.length ? share.relays : DEFAULT_RELAYS);
+  const [newRelayUrl, setNewRelayUrl] = React.useState('');
   const [peers, setPeers] = React.useState<PeerPolicy[]>(() => (share ? initializePeers(share.group, share.share) : []));
   const [logs, setLogs] = React.useState<LogEntry[]>([]);
   const [nodeStatus, setNodeStatus] = React.useState<'stopped' | 'connecting' | 'running'>(share ? 'stopped' : 'stopped');
@@ -104,21 +88,19 @@ export default function SignerPage() {
     };
   }, []);
 
-  const addLog = React.useCallback((level: string, message: string, detail?: unknown) => {
+  const addLog = React.useCallback((level: string, message: string, data?: unknown) => {
     const entry: LogEntry = {
       time: new Date().toLocaleTimeString(),
       level,
       message,
-      detail: detail === undefined ? undefined : formatDetail(detail)
+      data,
+      id: Math.random().toString(36).substring(2, 11)
     };
     setLogs((prev) => [...prev.slice(-MAX_LOGS + 1), entry]);
   }, []);
 
   const setupNodeListeners = React.useCallback(
     (node: NodeWithEvents) => {
-      // Note: 'ready' event often fires before listeners are attached,
-      // so we set status to 'running' immediately after await in handleStart.
-      // This handler is a fallback in case the event fires after attachment.
       const handleReady = () => {
         setNodeStatus((prev) => (prev === 'connecting' ? 'running' : prev));
         setNodeError(null);
@@ -136,15 +118,15 @@ export default function SignerPage() {
       const handleMessage = (msg: any) => {
         const tag = typeof msg?.tag === 'string' ? msg.tag : 'message';
         if (EVENT_LABELS[tag]) {
-          addLog(EVENT_LABELS[tag].level, EVENT_LABELS[tag].message);
+          addLog(EVENT_LABELS[tag].level, EVENT_LABELS[tag].message, msg);
           return;
         }
         if (tag.startsWith('/sign/')) {
-          addLog('SIGN', `Signature event ${tag}`);
+          addLog('SIGN', `Signature event ${tag}`, msg);
         } else if (tag.startsWith('/ecdh/')) {
-          addLog('ECDH', `ECDH event ${tag}`);
+          addLog('ECDH', `ECDH event ${tag}`, msg);
         } else if (tag.startsWith('/ping/')) {
-          addLog('PING', `Ping event ${tag}`);
+          addLog('PING', `Ping event ${tag}`, msg);
         }
       };
 
@@ -177,8 +159,6 @@ export default function SignerPage() {
       cleanupRef.current?.();
       cleanupRef.current = setupNodeListeners(node);
 
-      // Node is ready when createAndConnectNode resolves - don't wait for 'ready' event
-      // (the event may have already fired before listeners were attached)
       setNodeStatus('running');
       setNodeError(null);
       addLog('READY', 'Signer node ready');
@@ -205,16 +185,6 @@ export default function SignerPage() {
     addLog('INFO', 'Signer stopped');
   };
 
-  const handleKeepAlive = async () => {
-    if (!share || !nodeRef.current) {
-      addLog('INFO', 'Start the signer before sending keep-alive');
-      return;
-    }
-    addLog('PING', 'Keep-alive requested');
-    const updatedPeers = await refreshPeerStatuses(nodeRef.current, share.group, share.share, peers);
-    setPeers(updatedPeers);
-  };
-
   const handlePingPeer = React.useCallback(async (pubkey: string) => {
     if (!nodeRef.current) {
       addLog('INFO', 'Start the signer before pinging peers');
@@ -224,7 +194,6 @@ export default function SignerPage() {
     addLog('PING', `Pinging ${peerAlias}...`);
     const result = await pingSinglePeer(nodeRef.current, pubkey);
 
-    // Update peer state based on ping result
     setPeers((prev) =>
       prev.map((p) =>
         p.pubkey === pubkey ? { ...p, state: result.success ? 'online' : 'offline' } : p
@@ -246,34 +215,49 @@ export default function SignerPage() {
       const updated = prev.map((p) =>
         p.pubkey === pubkey ? { ...p, [field]: value } : p
       );
-      // Persist to localStorage
       savePeerPolicies(updated.map((p) => ({ pubkey: p.pubkey, send: p.send, receive: p.receive })));
       return updated;
     });
     addLog('INFO', `${peerAlias} ${field} policy set to ${value ? 'allow' : 'deny'}`);
   }, [peers, addLog]);
 
-  const signerState: StatusState = nodeStatus === 'running' ? 'online' : nodeStatus === 'connecting' ? 'warning' : 'offline';
-  const relayRows: RelayState[] = (relays.length ? relays : DEFAULT_RELAYS).map((url) => ({
-    url,
-    latency: nodeStatus === 'running' ? '—' : '…',
-    sync: nodeStatus === 'running' ? '100%' : '0%',
-    state: signerState
-  }));
+  const handleCopy = async (text: string, field: 'group' | 'share') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedStates(prev => ({ ...prev, [field]: true }));
+      setTimeout(() => {
+        setCopiedStates(prev => ({ ...prev, [field]: false }));
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
-  function copy(text: string) {
-    if (!text) return;
-    navigator.clipboard?.writeText(text);
-  }
+  const handleAddRelay = () => {
+    if (newRelayUrl && !relays.includes(newRelayUrl)) {
+      setRelays([...relays, newRelayUrl]);
+      setNewRelayUrl('');
+    }
+  };
+
+  const handleRemoveRelay = (urlToRemove: string) => {
+    setRelays(relays.filter(url => url !== urlToRemove));
+  };
+
+  const isSignerRunning = nodeStatus === 'running';
+  const isConnecting = nodeStatus === 'connecting';
+  const canStart = share && relays.length > 0;
 
   if (!share) {
     return (
-      <PageLayout header={<AppHeader subtitle="Signer" title="Waiting for credentials" />}>        
-        <ContentCard title="No credentials" description="Onboard first to add a share.">
+      <PageLayout header={<AppHeader title="igloo web" />}>
+        <div className="border border-blue-800/30 rounded-lg p-6">
+          <h2 className="text-xl font-semibold text-blue-300 mb-2">No credentials</h2>
+          <p className="text-gray-400 text-sm mb-4">Onboard first to add a share.</p>
           <Button variant="ghost" onClick={logout}>
             Go to onboarding
           </Button>
-        </ContentCard>
+        </div>
       </PageLayout>
     );
   }
@@ -282,212 +266,218 @@ export default function SignerPage() {
     <PageLayout
       header={
         <AppHeader
-          subtitle="Signer"
-          title="Signer Control"
+          title="igloo web"
           right={
-            <Button variant="ghost" onClick={logout}>
+            <Button variant="ghost" size="sm" onClick={logout}>
               Log out
             </Button>
           }
         />
       }
     >
-      {/* Share context */}
-      <div className="rounded-lg border border-blue-900/30 bg-gray-800/30 p-4">
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <Users className="h-5 w-5 text-blue-400" />
-          <span className="font-medium text-blue-100">Share #{diagnostics.summary?.idx ?? '—'}</span>
-          {diagnostics.summary && (
-            <span className="text-gray-400">Threshold {diagnostics.summary.threshold}/{diagnostics.summary.totalMembers}</span>
+      <div className="space-y-6">
+        {/* Section header with tooltip */}
+        <div className="flex items-center">
+          <h2 className="text-blue-300 text-lg">Start your signer to handle requests</h2>
+          <span title="The signer must be running to handle signature requests from clients. When active, it will communicate with other nodes through your configured relays.">
+            <HelpCircle size={18} className="ml-2 text-blue-400 cursor-help" />
+          </span>
+        </div>
+
+        {/* Share Information Header */}
+        {diagnostics.summary && (
+          <div className="border border-blue-800/30 rounded-lg p-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <User className="h-5 w-5 text-blue-400" />
+                <span className="text-blue-200 font-medium">{share.keysetName || `Share ${diagnostics.summary.idx}`}</span>
+              </div>
+              <div className="text-gray-400">•</div>
+              <div className="text-gray-300 text-sm">
+                Index: <span className="text-blue-400 font-mono">{diagnostics.summary.idx}</span>
+              </div>
+              <div className="text-gray-400">•</div>
+              <div className="text-gray-300 text-sm">
+                Threshold: <span className="text-blue-400">{diagnostics.summary.threshold}</span>/<span className="text-blue-400">{diagnostics.summary.totalMembers}</span>
+              </div>
+            </div>
+            {diagnostics.summary.pubkey && (
+              <div className="mt-2">
+                <div className="text-gray-300 text-sm">
+                  Pubkey: <span className="font-mono text-xs text-blue-300 truncate block">{diagnostics.summary.pubkey}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Credential inputs section */}
+        <div className="space-y-3">
+          {/* Group credential */}
+          <div className="flex">
+            <Input
+              type="text"
+              value={share.group}
+              className="bg-gray-800/50 border-gray-700/50 text-blue-300 py-2 text-sm w-full font-mono"
+              readOnly
+              disabled={isSignerRunning || isConnecting}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => handleCopy(share.group, 'group')}
+              className="ml-2 bg-blue-800/30 text-blue-400 hover:text-blue-300 hover:bg-blue-800/50"
+              title="Copy"
+            >
+              {copiedStates.group ? <Check className="h-5 w-5" /> : <Copy className="h-5 w-5" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setExpanded(prev => ({ ...prev, group: !prev.group }))}
+              className="ml-2 bg-blue-800/30 text-blue-400 hover:text-blue-300 hover:bg-blue-800/50"
+              title="Decoded"
+            >
+              {expanded.group ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+            </Button>
+          </div>
+
+          {expanded.group && diagnostics.group && (
+            <div className="space-y-1">
+              <div className="text-xs text-gray-400 font-medium">Decoded Data:</div>
+              <pre className="bg-gray-900/50 p-3 rounded text-xs text-blue-300 font-mono overflow-x-auto">
+                {JSON.stringify(diagnostics.group, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {/* Share credential */}
+          <div className="flex">
+            <Input
+              type="password"
+              value={share.share}
+              className="bg-gray-800/50 border-gray-700/50 text-blue-300 py-2 text-sm w-full font-mono"
+              readOnly
+              disabled={isSignerRunning || isConnecting}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => handleCopy(share.share, 'share')}
+              className="ml-2 bg-blue-800/30 text-blue-400 hover:text-blue-300 hover:bg-blue-800/50"
+              title="Copy"
+            >
+              {copiedStates.share ? <Check className="h-5 w-5" /> : <Copy className="h-5 w-5" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setExpanded(prev => ({ ...prev, share: !prev.share }))}
+              className="ml-2 bg-blue-800/30 text-blue-400 hover:text-blue-300 hover:bg-blue-800/50"
+              title="Decoded"
+            >
+              {expanded.share ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+            </Button>
+          </div>
+
+          {expanded.share && diagnostics.share && (
+            <div className="space-y-1">
+              <div className="text-xs text-gray-400 font-medium">Decoded Data:</div>
+              <pre className="bg-gray-900/50 p-3 rounded text-xs text-blue-300 font-mono overflow-x-auto">
+                {JSON.stringify(diagnostics.share, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {/* Signer status row */}
+          <div className="flex items-center justify-between mt-6">
+            <div className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${
+                isSignerRunning ? 'bg-green-500 pulse-animation' :
+                isConnecting ? 'bg-yellow-500 pulse-animation-yellow' :
+                'bg-red-500'
+              }`} />
+              <span className="text-gray-300">
+                Signer {isSignerRunning ? 'Running' : isConnecting ? 'Connecting...' : 'Stopped'}
+              </span>
+            </div>
+            <Button
+              onClick={isSignerRunning ? handleStop : handleStart}
+              className={`px-6 py-2 ${
+                isSignerRunning ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
+              } transition-colors duration-200 text-sm font-medium`}
+              disabled={!canStart || isConnecting}
+            >
+              {isSignerRunning ? 'Stop Signer' : isConnecting ? 'Connecting...' : 'Start Signer'}
+            </Button>
+          </div>
+
+          {nodeError && (
+            <div className="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+              {nodeError}
+            </div>
           )}
         </div>
-        {share.group && (
-          <div className="mt-2 flex items-center gap-2 text-xs">
-            <span className="text-gray-500">Group:</span>
-            <span className="font-mono text-blue-300">{formatPubkey(share.group)}</span>
+
+        {/* Relay URLs section */}
+        <div className="space-y-3">
+          <div className="flex items-center">
+            <h3 className="text-blue-300 text-sm font-medium">Relay URLs</h3>
+            <span title="You must be connected to at least one relay to communicate with other signers. Ensure all signers have at least one common relay to coordinate successfully.">
+              <HelpCircle size={16} className="ml-2 text-blue-400 cursor-help" />
+            </span>
           </div>
-        )}
-      </div>
-
-      {/* Credentials */}
-      <ContentCard title="Credentials" description="Verified via igloo-core">
-        <div className="grid gap-6 md:grid-cols-2">
-          <CredentialField
-            label="Group credential"
-            value={share.group}
-            decoded={diagnostics.group ?? {}}
-            expanded={expanded.group}
-            onToggle={() => setExpanded((prev) => ({ ...prev, group: !prev.group }))}
-            status="valid"
-            onCopy={() => copy(share.group)}
-          />
-          <CredentialField
-            label="Share credential"
-            value={share.share}
-            decoded={diagnostics.share ?? {}}
-            expanded={expanded.share}
-            onToggle={() => setExpanded((prev) => ({ ...prev, share: !prev.share }))}
-            status="valid"
-            onCopy={() => copy(share.share)}
-            sensitive
-          />
-        </div>
-      </ContentCard>
-
-      {/* Signer engine */}
-      <ContentCard
-        title="Signer Engine"
-        description="Local signer must remain active to service remote requests"
-      >
-        <div className="flex flex-col gap-4">
-          {/* Status row */}
-          <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-blue-900/30 bg-gray-800/30 p-4">
-            <div className="flex items-center gap-3">
-              <StatusDot state={signerState} />
-              <div>
-                <p className="text-sm font-medium text-blue-100">
-                  {nodeStatus === 'running' ? 'Running' : nodeStatus === 'connecting' ? 'Connecting...' : 'Stopped'}
-                </p>
-                <p className="text-xs text-gray-500">Requires valid group + share + relay quorum</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              <Activity className="h-4 w-4" />
-              {nodeStatus === 'running' ? 'Active' : 'Idle'}
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex">
+            <Input
+              type="text"
+              placeholder="Add relay URL"
+              value={newRelayUrl}
+              onChange={(e) => setNewRelayUrl(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddRelay()}
+              className="bg-gray-800/50 border-gray-700/50 text-blue-300 py-2 text-sm w-full"
+              disabled={isSignerRunning || isConnecting}
+            />
             <Button
-              type="button"
-              onClick={nodeStatus === 'running' ? handleStop : handleStart}
-              variant={nodeStatus === 'running' ? 'destructive' : 'success'}
-              className="min-w-[140px]"
+              onClick={handleAddRelay}
+              className="ml-2 bg-blue-800/30 text-blue-400 hover:text-blue-300 hover:bg-blue-800/50"
+              disabled={!newRelayUrl.trim() || isSignerRunning || isConnecting}
             >
-              {nodeStatus === 'running' ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
-              {nodeStatus === 'running' ? 'Stop' : 'Start'}
-            </Button>
-            <Button type="button" variant="outline" onClick={handleKeepAlive}>
-              <Radio className="h-4 w-4" />
-              Keep-alive
+              Add
             </Button>
           </div>
-        </div>
-        {nodeError && (
-          <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-            {nodeError}
-          </div>
-        )}
-      </ContentCard>
 
-      {/* Relays */}
-      <ContentCard title="Relay Connectivity" description="All configured relays should be reachable before accepting requests">
-        <div className="mb-4">
-          <RelayInput relays={relays} onChange={setRelays} />
-        </div>
-        <div className="space-y-2">
-          {relayRows.map((relay) => (
-            <div key={relay.url} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-blue-900/30 bg-gray-800/30 p-3 text-sm">
-              <div className="flex items-center gap-3 min-w-0">
-                {relay.state === 'online' && <SignalHigh className="h-4 w-4 text-green-400 shrink-0" />}
-                {relay.state === 'warning' && <SignalMedium className="h-4 w-4 text-yellow-400 shrink-0" />}
-                {relay.state === 'offline' && <SignalZero className="h-4 w-4 text-red-400 shrink-0" />}
-                <span className="font-mono text-blue-100 truncate">{relay.url}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <StatusBadge state={relay.state} />
-                <Button
-                  variant="ghost"
+          <div className="space-y-2">
+            {relays.map((relay, index) => (
+              <div key={index} className="flex justify-between items-center bg-gray-800/30 py-2 px-3 rounded-md">
+                <span className="text-blue-300 text-sm font-mono">{relay}</span>
+                <IconButton
+                  variant="destructive"
                   size="sm"
-                  className="text-gray-500 hover:text-red-400"
-                  onClick={() => setRelays(relays.filter((r) => r !== relay.url))}
-                >
-                  Remove
-                </Button>
+                  icon={<X className="h-4 w-4" />}
+                  onClick={() => handleRemoveRelay(relay)}
+                  tooltip="Remove relay"
+                  disabled={isSignerRunning || isConnecting || relays.length <= 1}
+                />
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </ContentCard>
 
-      {/* Peers + Logs */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ContentCard title="Peer Policies" description="Click policy badges to toggle send / receive rules">
-          <PeerList peers={peers} onPing={handlePingPeer} onPolicyChange={handlePolicyChange} disabled={nodeStatus !== 'running'} />
-        </ContentCard>
+        {/* Peer List and Event Log - stacked vertically */}
+        <div className="space-y-4">
+          <PeerList
+            peers={peers}
+            onPing={handlePingPeer}
+            onPolicyChange={handlePolicyChange}
+            disabled={nodeStatus !== 'running'}
+          />
 
-        <ContentCard title="Event Log" description="Chronological digest of signer activity">
-          <EventLog entries={logs} onClear={() => setLogs([])} />
-        </ContentCard>
+          <EventLog
+            entries={logs}
+            onClear={() => setLogs([])}
+          />
+        </div>
       </div>
     </PageLayout>
   );
 }
-
-type CredentialFieldProps = {
-  label: string;
-  value: string;
-  expanded: boolean;
-  onToggle: () => void;
-  decoded?: Record<string, unknown> | unknown;
-  status?: 'valid' | 'idle';
-  onCopy?: () => void;
-  sensitive?: boolean;
-};
-
-function CredentialField({ label, value, expanded, onToggle, decoded, status, onCopy, sensitive = false }: CredentialFieldProps) {
-  const [visible, setVisible] = React.useState(!sensitive);
-  const maskedValue = sensitive && !visible ? '•'.repeat(Math.min(value.length, 60)) : value;
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-blue-300">{label}</span>
-        <div className="flex items-center gap-2">
-          {status === 'valid' && (
-            <span className="inline-flex items-center gap-1 text-xs text-green-400">
-              <CheckCircle2 className="h-3.5 w-3.5" /> Valid
-            </span>
-          )}
-          {sensitive && (
-            <IconButton
-              variant="ghost"
-              size="sm"
-              icon={visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              onClick={() => setVisible(!visible)}
-              tooltip={visible ? 'Hide credential' : 'Show credential'}
-              className="text-gray-500 hover:text-blue-300"
-            />
-          )}
-          <IconButton variant="ghost" size="sm" icon={<HelpCircle className="h-4 w-4" />} tooltip="Match the credential exported from Igloo Desktop" className="text-gray-500 hover:text-blue-300" />
-        </div>
-      </div>
-      <Textarea readOnly value={maskedValue} rows={3} className="text-xs" />
-      <div className="flex gap-2">
-        <Button variant="secondary" size="sm" className="flex-1" onClick={onCopy}>
-          <Copy className="h-3.5 w-3.5" />
-          Copy
-        </Button>
-        <Button type="button" variant="outline" size="sm" onClick={onToggle} className="flex-1">
-          {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-          Details
-        </Button>
-      </div>
-      {expanded && (
-        <pre className="rounded-md border border-blue-900/30 bg-gray-800/50 p-3 text-[11px] font-mono leading-relaxed text-blue-100 overflow-x-auto">
-          {JSON.stringify(decoded ?? {}, null, 2)}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-const formatDetail = (detail: unknown) => {
-  if (typeof detail === 'string') return detail;
-  try {
-    return JSON.stringify(detail);
-  } catch {
-    return String(detail);
-  }
-};

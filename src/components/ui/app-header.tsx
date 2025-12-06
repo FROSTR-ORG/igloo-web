@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
+import frostrLogo from '@/assets/frostr-logo-transparent.png';
 
 type AppHeaderProps = {
   title?: string;
@@ -8,39 +9,24 @@ type AppHeaderProps = {
   className?: string;
 };
 
-export function AppHeader({ title = 'Igloo', subtitle, right, className }: AppHeaderProps) {
+export function AppHeader({ title = 'igloo', subtitle, right, className }: AppHeaderProps) {
   return (
-    <header className={cn('mb-2', className)}>
+    <header className={cn('mb-6', className)}>
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          {/* Logo */}
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500/20 to-cyan-500/10 border border-blue-500/30">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              className="h-7 w-7 text-blue-400"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 3L4 7.5v9L12 21l8-4.5v-9L12 3z"
-              />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 12l8-4.5M12 12v9M12 12L4 7.5"
-              />
-            </svg>
-          </div>
+        <div className="flex items-center gap-3 sm:gap-4">
+          {/* Frostr Logo */}
+          <img
+            src={frostrLogo}
+            alt="Frostr"
+            className="h-11 w-11 object-contain"
+          />
           {/* Title block */}
           <div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-300 via-blue-200 to-cyan-300 bg-clip-text text-transparent">
+            <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-blue-300 via-blue-200 to-cyan-300 bg-clip-text text-transparent">
               {title}
             </h1>
             {subtitle && (
-              <p className="text-sm text-blue-400/80">{subtitle}</p>
+              <p className="text-sm text-gray-400 mt-0.5">{subtitle}</p>
             )}
           </div>
         </div>
