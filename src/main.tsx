@@ -15,14 +15,6 @@ if (typeof window !== 'undefined') {
     return false;
   };
 
-  window.onunhandledrejection = (event) => {
-    if (swallowRelayClose(event.reason)) {
-      event.preventDefault();
-      return false;
-    }
-    return undefined;
-  };
-
   window.addEventListener('unhandledrejection', (event) => {
     if (swallowRelayClose(event.reason)) {
       event.preventDefault();
