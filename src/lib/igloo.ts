@@ -7,6 +7,8 @@ import {
   normalizePubkey,
   pingPeer,
   pingPeersAdvanced,
+  createBifrostNode,
+  connectNode,
   type BifrostNode,
   type GroupPackage,
   type SharePackage,
@@ -14,6 +16,7 @@ import {
   validateRelayList,
   validateShare
 } from '@frostr/igloo-core';
+import { finalize_message } from '@cmdcode/nostr-p2p/lib';
 
 import type { PeerPolicy } from '@/components/ui/peer-list';
 
@@ -135,6 +138,203 @@ export async function startSignerNode(config: { group: string; share: string; re
   });
 }
 
+/**
+ * Creates a signer node WITHOUT connecting. Use connectSignerNode() to connect.
+ * This allows attaching message handlers before the node goes live.
+ */
+export function createSignerNode(config: { group: string; share: string; relays: string[] }) {
+  return createBifrostNode(config, {
+    enableLogging: true,
+    logLevel: 'info'
+  });
+}
+
+/**
+ * Connects a previously created signer node.
+ */
+export async function connectSignerNode(node: BifrostNode) {
+  return connectNode(node);
+}
+
+/**
+ * Sends echo using the existing connected node.
+ * Uses node.req.echo() which sends to SELF - but other devices subscribed
+ * to this node's pubkey (as a peer) will see the /echo/req via their
+ * message event, triggering awaitShareEcho.
+ *
+ * IMPORTANT: Timeout is EXPECTED! Bifrost doesn't route /echo/req to a handler,
+ * so no /echo/res is generated. But the echo WAS broadcast successfully.
+ * Other devices listening with awaitShareEcho will see the message.
+ */
+export async function sendEchoViaNode(
+  node: BifrostNode,
+  logger?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: unknown) => void
+): Promise<boolean> {
+  try {
+    const challenge = generateEchoChallenge();
+    logger?.('debug', 'Sending echo via node.req.echo()', { challenge: challenge.substring(0, 16) + '...' });
+
+    const response = await (node as any).req.echo(challenge);
+
+    // If we get a response (unlikely without bifrost fix), great!
+    if (response?.ok) {
+      logger?.('info', 'Echo sent and response received');
+      return true;
+    }
+
+    // Timeout or no response - but echo WAS broadcast!
+    // This is expected behavior - bifrost doesn't have /echo/req handler
+    logger?.('info', 'Echo broadcast successful (no response expected)');
+    return true;
+
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+
+    // Timeout is EXPECTED - bifrost has no /echo/req handler
+    // The echo was still broadcast to the relay!
+    if (msg.toLowerCase().includes('timeout')) {
+      logger?.('info', 'Echo broadcast successful (timeout is expected)');
+      return true;
+    }
+
+    // Relay close after send is acceptable
+    if (msg.toLowerCase().includes('relay connection closed')) {
+      logger?.('info', 'Echo broadcast (relay closed after send)');
+      return true;
+    }
+
+    // Actual failures
+    logger?.('warn', 'Echo send failed', msg);
+    return false;
+  }
+}
+
+/**
+ * Publishes echo to SELF using client.publish() (fire-and-forget).
+ * This is different from node.req.echo() which uses client.request().
+ *
+ * igloo-desktop's awaitShareEcho uses the SAME share credentials,
+ * so it has the SAME pubkey and can decrypt messages to that pubkey.
+ *
+ * Key insight: client.publish() broadcasts work, client.request() doesn't
+ * for cross-device echo even when both nodes have the same pubkey.
+ */
+export async function publishEchoToSelf(
+  node: BifrostNode,
+  logger?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: unknown) => void
+): Promise<boolean> {
+  const nodeAny = node as any;
+  const selfPubkey = nodeAny.pubkey;
+
+  if (!selfPubkey) {
+    logger?.('warn', 'Cannot publish echo: node pubkey not available');
+    return false;
+  }
+
+  try {
+    // Create finalized message envelope (same pattern as broadcastEchoToPeers)
+    const envelope = finalize_message({
+      data: 'echo',
+      id: generateEchoChallenge(16),
+      tag: '/echo/req'
+    });
+
+    logger?.('debug', 'Publishing echo to self', { pubkey: selfPubkey.substring(0, 16) + '...' });
+
+    // Publish to our OWN pubkey using client.publish() (not client.request())
+    const result = await nodeAny.client.publish(envelope, selfPubkey);
+
+    if (result?.ok) {
+      logger?.('info', 'Echo published to self successfully');
+      return true;
+    } else {
+      const reason = result?.reason || result?.err || 'not ok';
+      logger?.('debug', 'Echo publish returned not-ok', { reason });
+      return false;
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+
+    // Relay close after publish is acceptable
+    if (msg.toLowerCase().includes('relay connection closed')) {
+      logger?.('info', 'Echo published (relay closed after send)');
+      return true;
+    }
+
+    logger?.('warn', 'Echo publish failed', msg);
+    return false;
+  }
+}
+
+/**
+ * Broadcasts echo to all PEERS (not self).
+ * This is what igloo-desktop's awaitShareEcho needs - it listens for /echo/req
+ * from a specific peer pubkey. The message must be encrypted TO the peer's pubkey
+ * so they can decrypt and see it.
+ *
+ * Uses finalize_message + client.publish() pattern from igloo-server's broadcastShareEcho.
+ * This sends the message encrypted to EACH peer's pubkey, so they can decrypt it.
+ */
+export async function broadcastEchoToPeers(
+  node: BifrostNode,
+  logger?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: unknown) => void
+): Promise<{ success: number; total: number }> {
+  const nodeAny = node as any;
+  const peers = nodeAny.peers || nodeAny._peers || [];
+
+  if (!Array.isArray(peers) || peers.length === 0) {
+    logger?.('warn', 'No peers to broadcast echo to');
+    return { success: 0, total: 0 };
+  }
+
+  let successCount = 0;
+
+  logger?.('debug', 'Broadcasting echo to peers', { count: peers.length });
+
+  // Send echo to each peer sequentially (parallel can overwhelm relays)
+  for (const peer of peers) {
+    const pubkey = peer?.pubkey;
+    if (!pubkey) continue;
+
+    try {
+      // Create finalized message envelope (like igloo-server's broadcastShareEcho does)
+      // Use 'echo' literal - igloo-core's awaitShareEcho accepts: data === 'echo' || isEvenLengthHex(data)
+      const envelope = finalize_message({
+        data: 'echo',
+        id: generateEchoChallenge(16),
+        tag: '/echo/req'
+      });
+
+      // Publish to this peer's pubkey (so THEY can decrypt)
+      const result = await nodeAny.client.publish(envelope, pubkey);
+
+      if (result?.ok) {
+        successCount++;
+        logger?.('debug', `Echo published to peer`, { pubkey: pubkey.substring(0, 16) + '...' });
+      } else {
+        // Log the reason if available
+        const reason = result?.reason || result?.err || 'not ok';
+        logger?.('debug', `Echo publish returned not-ok`, { pubkey: pubkey.substring(0, 16) + '...', reason });
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+
+      // Relay close after publish is acceptable - message was likely sent
+      if (msg.toLowerCase().includes('relay connection closed')) {
+        successCount++;
+        logger?.('debug', `Echo published (relay closed)`, { pubkey: pubkey.substring(0, 16) + '...' });
+        continue;
+      }
+
+      // Log other errors
+      logger?.('warn', `Echo to peer failed`, { pubkey: pubkey.substring(0, 16) + '...', error: msg });
+    }
+  }
+
+  logger?.('info', `Echo broadcast to ${successCount}/${peers.length} peers`);
+  return { success: successCount, total: peers.length };
+}
+
 export function stopSignerNode(node: BifrostNode | null) {
   if (!node) return;
 
@@ -252,6 +452,80 @@ export function detachEvent(node: NodeWithEvents, event: string, handler: (...ar
     }
   } catch (error) {
     console.warn(`Failed to detach event ${event}`, error);
+  }
+}
+
+function generateEchoChallenge(byteLength = 32): string {
+  const buffer = new Uint8Array(byteLength);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(buffer);
+  } else {
+    for (let i = 0; i < buffer.length; i += 1) {
+      buffer[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  return Array.from(buffer, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export async function respondToEchoRequest(
+  node: BifrostNode,
+  msg: any,
+  logger?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: unknown) => void
+): Promise<boolean> {
+  try {
+    const requesterPubkeyRaw = typeof msg?.env?.pubkey === 'string' ? msg.env.pubkey.trim() : '';
+    if (!requesterPubkeyRaw) {
+      throw new Error('Echo request missing requester pubkey');
+    }
+
+    const normalizedRequester = safeNormalize(requesterPubkeyRaw);
+    const nodeAny = node as any;
+    const peerCollections = [nodeAny?._peers, nodeAny?.peers];
+
+    let peerPolicy: any | null = null;
+    for (const collection of peerCollections) {
+      if (!Array.isArray(collection)) continue;
+      const match = collection.find((entry: any) => {
+        const entryPub = typeof entry?.pubkey === 'string' ? entry.pubkey : null;
+        if (!entryPub) return false;
+        return safeNormalize(entryPub) === normalizedRequester;
+      });
+      if (match) {
+        peerPolicy = match?.policy ?? { send: true, recv: true };
+        break;
+      }
+    }
+
+    if (!peerPolicy) {
+      logger?.('info', 'Ignoring echo request from unknown peer', { pubkey: requesterPubkeyRaw });
+      return false;
+    }
+
+    const echoId =
+      typeof msg?.id === 'string' && msg.id.trim().length > 0 ? msg.id.trim() : generateEchoChallenge(16);
+
+    const envelope = finalize_message({
+      data: JSON.stringify(peerPolicy),
+      id: echoId,
+      tag: '/echo/res'
+    });
+
+    const publishResult = await nodeAny?.client?.publish?.(envelope, requesterPubkeyRaw);
+    if (!publishResult?.ok) {
+      const reason = publishResult?.reason ?? publishResult?.error ?? 'unknown publish error';
+      throw new Error(typeof reason === 'string' ? reason : JSON.stringify(reason));
+    }
+
+    logger?.('info', 'Echo response published', { pubkey: requesterPubkeyRaw, echoId });
+    return true;
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    if (details.toLowerCase().includes('relay connection closed by us')) {
+      logger?.('info', 'Echo response sent (relay closed after publish)', details);
+      return true;
+    }
+    logger?.('warn', 'Failed to publish echo response', details);
+    return false;
   }
 }
 
