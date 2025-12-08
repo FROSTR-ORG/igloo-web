@@ -20,6 +20,23 @@ import { finalize_message } from '@cmdcode/nostr-p2p/lib';
 
 import type { PeerPolicy } from '@/components/ui/peer-list';
 
+/**
+ * Local interface documenting the BifrostNode internals we access.
+ * @frostr/bifrost doesn't export these types, so we define them here
+ * to make our assumptions explicit. This doesn't provide runtime safety
+ * but documents what we expect from the node object.
+ *
+ * If bifrost changes its internal structure, TypeScript won't catch it,
+ * but at least our assumptions are documented in one place.
+ */
+interface BifrostNodeInternals {
+  pubkey: string;
+  peers: Array<{ pubkey: string; policy?: { send?: boolean; recv?: boolean } }>;
+  client: {
+    publish: (envelope: unknown, pubkey: string) => Promise<{ ok: boolean; reason?: string; err?: string }>;
+  };
+}
+
 export const DEFAULT_RELAYS = ['wss://relay.primal.net', 'wss://relay.damus.io'];
 
 export type CredentialDiagnostics = {
@@ -157,59 +174,6 @@ export async function connectSignerNode(node: BifrostNode) {
 }
 
 /**
- * Sends echo using the existing connected node.
- * Uses node.req.echo() which sends to SELF - but other devices subscribed
- * to this node's pubkey (as a peer) will see the /echo/req via their
- * message event, triggering awaitShareEcho.
- *
- * IMPORTANT: Timeout is EXPECTED! Bifrost doesn't route /echo/req to a handler,
- * so no /echo/res is generated. But the echo WAS broadcast successfully.
- * Other devices listening with awaitShareEcho will see the message.
- */
-export async function sendEchoViaNode(
-  node: BifrostNode,
-  logger?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: unknown) => void
-): Promise<boolean> {
-  try {
-    const challenge = generateEchoChallenge();
-    logger?.('debug', 'Sending echo via node.req.echo()', { challenge: challenge.substring(0, 16) + '...' });
-
-    const response = await (node as any).req.echo(challenge);
-
-    // If we get a response (unlikely without bifrost fix), great!
-    if (response?.ok) {
-      logger?.('info', 'Echo sent and response received');
-      return true;
-    }
-
-    // Timeout or no response - but echo WAS broadcast!
-    // This is expected behavior - bifrost doesn't have /echo/req handler
-    logger?.('info', 'Echo broadcast successful (no response expected)');
-    return true;
-
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-
-    // Timeout is EXPECTED - bifrost has no /echo/req handler
-    // The echo was still broadcast to the relay!
-    if (msg.toLowerCase().includes('timeout')) {
-      logger?.('info', 'Echo broadcast successful (timeout is expected)');
-      return true;
-    }
-
-    // Relay close after send is acceptable
-    if (msg.toLowerCase().includes('relay connection closed')) {
-      logger?.('info', 'Echo broadcast (relay closed after send)');
-      return true;
-    }
-
-    // Actual failures
-    logger?.('warn', 'Echo send failed', msg);
-    return false;
-  }
-}
-
-/**
  * Publishes echo to SELF using client.publish() (fire-and-forget).
  * This is different from node.req.echo() which uses client.request().
  *
@@ -218,13 +182,17 @@ export async function sendEchoViaNode(
  *
  * Key insight: client.publish() broadcasts work, client.request() doesn't
  * for cross-device echo even when both nodes have the same pubkey.
+ *
+ * NOTE: Casts to BifrostNodeInternals because @frostr/bifrost doesn't export
+ * typed interfaces. See BifrostNodeInternals definition for documented assumptions.
  */
 export async function publishEchoToSelf(
   node: BifrostNode,
   logger?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: unknown) => void
 ): Promise<boolean> {
-  const nodeAny = node as any;
-  const selfPubkey = nodeAny.pubkey;
+  // Cast to our local interface that documents expected internal structure
+  const nodeInternal = node as unknown as BifrostNodeInternals;
+  const selfPubkey = nodeInternal.pubkey;
 
   if (!selfPubkey) {
     logger?.('warn', 'Cannot publish echo: node pubkey not available');
@@ -242,7 +210,7 @@ export async function publishEchoToSelf(
     logger?.('debug', 'Publishing echo to self', { pubkey: selfPubkey.substring(0, 16) + '...' });
 
     // Publish to our OWN pubkey using client.publish() (not client.request())
-    const result = await nodeAny.client.publish(envelope, selfPubkey);
+    const result = await nodeInternal.client.publish(envelope, selfPubkey);
 
     if (result?.ok) {
       logger?.('info', 'Echo published to self successfully');
@@ -255,7 +223,10 @@ export async function publishEchoToSelf(
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
 
-    // Relay close after publish is acceptable
+    // INTENTIONAL: Treat "relay connection closed" as success.
+    // This error is thrown during cleanup AFTER the publish completes successfully.
+    // The message WAS sent; the relay just closed during teardown.
+    // This is known nostr-p2p behavior, not a failure case.
     if (msg.toLowerCase().includes('relay connection closed')) {
       logger?.('info', 'Echo published (relay closed after send)');
       return true;
@@ -274,13 +245,17 @@ export async function publishEchoToSelf(
  *
  * Uses finalize_message + client.publish() pattern from igloo-server's broadcastShareEcho.
  * This sends the message encrypted to EACH peer's pubkey, so they can decrypt it.
+ *
+ * NOTE: Casts to BifrostNodeInternals because @frostr/bifrost doesn't export
+ * typed interfaces. See BifrostNodeInternals definition for documented assumptions.
  */
 export async function broadcastEchoToPeers(
   node: BifrostNode,
   logger?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: unknown) => void
 ): Promise<{ success: number; total: number }> {
-  const nodeAny = node as any;
-  const peers = nodeAny.peers || nodeAny._peers || [];
+  // Cast to our local interface that documents expected internal structure
+  const nodeInternal = node as unknown as BifrostNodeInternals;
+  const peers = nodeInternal.peers;
 
   if (!Array.isArray(peers) || peers.length === 0) {
     logger?.('warn', 'No peers to broadcast echo to');
@@ -306,7 +281,7 @@ export async function broadcastEchoToPeers(
       });
 
       // Publish to this peer's pubkey (so THEY can decrypt)
-      const result = await nodeAny.client.publish(envelope, pubkey);
+      const result = await nodeInternal.client.publish(envelope, pubkey);
 
       if (result?.ok) {
         successCount++;
@@ -319,14 +294,14 @@ export async function broadcastEchoToPeers(
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
 
-      // Relay close after publish is acceptable - message was likely sent
+      // INTENTIONAL: Treat "relay connection closed" as success.
+      // Error thrown during cleanup AFTER publish completes. Known nostr-p2p behavior.
       if (msg.toLowerCase().includes('relay connection closed')) {
         successCount++;
         logger?.('debug', `Echo published (relay closed)`, { pubkey: pubkey.substring(0, 16) + '...' });
         continue;
       }
 
-      // Log other errors
       logger?.('warn', `Echo to peer failed`, { pubkey: pubkey.substring(0, 16) + '...', error: msg });
     }
   }
@@ -455,21 +430,55 @@ export function detachEvent(node: NodeWithEvents, event: string, handler: (...ar
   }
 }
 
+function getSecureCrypto(): Crypto {
+  const globalCrypto = typeof globalThis !== 'undefined' ? (globalThis as any).crypto : undefined;
+  if (globalCrypto?.getRandomValues) {
+    return globalCrypto as Crypto;
+  }
+
+  const nodeWebcrypto = tryGetNodeWebcrypto();
+  if (nodeWebcrypto?.getRandomValues) {
+    return nodeWebcrypto;
+  }
+
+  throw new Error('Secure randomness unavailable: crypto.getRandomValues is required to generate echo challenges.');
+}
+
+function tryGetNodeWebcrypto(): Crypto | undefined {
+  try {
+    // Use eval to avoid bundlers eagerly pulling in the Node crypto module in browsers.
+    const nodeRequire = (0, eval)('require') as undefined | ((id: string) => any);
+    if (typeof nodeRequire === 'function') {
+      const { webcrypto } = nodeRequire('crypto') ?? {};
+      if (webcrypto?.getRandomValues) return webcrypto as Crypto;
+    }
+  } catch {
+    // ignore; caller will throw a clear error when no secure RNG is available
+  }
+  return undefined;
+}
+
 function generateEchoChallenge(byteLength = 32): string {
   const buffer = new Uint8Array(byteLength);
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    crypto.getRandomValues(buffer);
-  } else {
-    for (let i = 0; i < buffer.length; i += 1) {
-      buffer[i] = Math.floor(Math.random() * 256);
-    }
-  }
+  const secureCrypto = getSecureCrypto();
+  secureCrypto.getRandomValues(buffer);
   return Array.from(buffer, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Responds to an incoming /echo/req message by publishing an /echo/res with peer policy.
+ *
+ * NOTE: Casts to BifrostNodeInternals because @frostr/bifrost doesn't export
+ * typed interfaces. See BifrostNodeInternals definition for documented assumptions.
+ * Message shape (`msg`) is also untyped from bifrost event handlers.
+ *
+ * @param node - BifrostNode instance
+ * @param msg - Message from 'message' event handler (untyped from bifrost)
+ * @param logger - Optional logging callback
+ */
 export async function respondToEchoRequest(
   node: BifrostNode,
-  msg: any,
+  msg: any, // Message shape not exported by @frostr/bifrost
   logger?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: unknown) => void
 ): Promise<boolean> {
   try {
@@ -479,20 +488,21 @@ export async function respondToEchoRequest(
     }
 
     const normalizedRequester = safeNormalize(requesterPubkeyRaw);
-    const nodeAny = node as any;
-    const peerCollections = [nodeAny?._peers, nodeAny?.peers];
 
-    let peerPolicy: any | null = null;
-    for (const collection of peerCollections) {
-      if (!Array.isArray(collection)) continue;
-      const match = collection.find((entry: any) => {
+    // Cast to our local interface that documents expected internal structure
+    const nodeInternal = node as unknown as BifrostNodeInternals;
+    const peers = nodeInternal.peers;
+
+    // Find the peer that sent this echo request
+    let peerPolicy: { send?: boolean; recv?: boolean } | null = null;
+    if (Array.isArray(peers)) {
+      const match = peers.find((entry) => {
         const entryPub = typeof entry?.pubkey === 'string' ? entry.pubkey : null;
         if (!entryPub) return false;
         return safeNormalize(entryPub) === normalizedRequester;
       });
       if (match) {
         peerPolicy = match?.policy ?? { send: true, recv: true };
-        break;
       }
     }
 
@@ -510,9 +520,9 @@ export async function respondToEchoRequest(
       tag: '/echo/res'
     });
 
-    const publishResult = await nodeAny?.client?.publish?.(envelope, requesterPubkeyRaw);
+    const publishResult = await nodeInternal.client.publish(envelope, requesterPubkeyRaw);
     if (!publishResult?.ok) {
-      const reason = publishResult?.reason ?? publishResult?.error ?? 'unknown publish error';
+      const reason = publishResult?.reason ?? publishResult?.err ?? 'unknown publish error';
       throw new Error(typeof reason === 'string' ? reason : JSON.stringify(reason));
     }
 
@@ -520,10 +530,17 @@ export async function respondToEchoRequest(
     return true;
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
+
+    // INTENTIONAL: Treat "relay connection closed by us" as success.
+    // This error is thrown during connection cleanup AFTER the publish completes.
+    // The message WAS sent successfully; the relay just closed during teardown.
+    // Without this branch, legitimate successful publishes would be incorrectly
+    // reported as failures. This is a known nostr-p2p behavior, not a bug.
     if (details.toLowerCase().includes('relay connection closed by us')) {
       logger?.('info', 'Echo response sent (relay closed after publish)', details);
       return true;
     }
+
     logger?.('warn', 'Failed to publish echo response', details);
     return false;
   }
