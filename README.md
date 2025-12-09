@@ -11,7 +11,7 @@ Browser-first FROSTR signer built with React/Vite, `@frostr/igloo-core`, and `@f
 - `@frostr/igloo-core` is the app-facing wrapper: it exposes credential/relay/peer helpers and a thin API for spinning up bifrost nodes so every Igloo app shares the same behavior. It saves app builders from wiring nostr-p2p/frost directly.
 - `@frostr/bifrost` is the reference FROSTR node: it rides on cmdruid’s `@cmdcode/nostr-p2p` (nostr relay SDK) and `@cmdcode/frost` (threshold Schnorr lib); igloo-core layers on top instead of re-implementing those pieces.
 - The FROSTR protocol itself lives in `frostr-org/frostr`; bifrost and all Igloo apps track that spec.
-- Handy links: protocol spec https://github.com/frostr-org/frostr, transport https://github.com/cmdruid/nostr-p2p, threshold lib https://github.com/cmdruid/frost.
+- Handy links: [protocol spec](https://github.com/frostr-org/frostr), [transport](https://github.com/cmdruid/nostr-p2p), [threshold lib](https://github.com/cmdruid/frost).
 
 ## Features
 - Guided onboarding validates `bfgroup`/`bfshare` creds before saving; relays are normalized and stored with an optional keyset name.
@@ -22,7 +22,7 @@ Browser-first FROSTR signer built with React/Vite, `@frostr/igloo-core`, and `@f
 
 ## Quick start (dev)
 - `npm install`
-- `npm run dev` then open http://localhost:5173
+- `npm run dev` then open [http://localhost:5173](http://localhost:5173)
 - `npm run build` → production assets in `dist/`; `npm run preview` to smoke-test the build.
 
 ## Using the signer
