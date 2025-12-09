@@ -133,7 +133,7 @@ publishEchoToSelf(node, echoLogger).then((success) => {
 
 ## Message Flow Diagram
 
-```
+```text
 ┌─────────────────┐                              ┌─────────────────┐
 │  igloo-desktop  │                              │   igloo-web     │
 │                 │                              │                 │
