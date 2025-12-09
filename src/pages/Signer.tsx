@@ -26,8 +26,11 @@ import {
   normalizeRelays,
   pingSinglePeer,
   refreshPeerStatuses,
-  startSignerNode,
+  createSignerNode,
+  connectSignerNode,
   stopSignerNode,
+  publishEchoToSelf,
+  respondToEchoRequest,
   type NodeWithEvents
 } from '@/lib/igloo';
 import { loadPeerPolicies, savePeerPolicies } from '@/lib/storage';
@@ -99,6 +102,9 @@ export default function SignerPage() {
     setLogs((prev) => [...prev.slice(-MAX_LOGS + 1), entry]);
   }, []);
 
+  // Note: Echo is now sent via the main node in handleStart after connecting.
+  // This eliminates the race condition with temp nodes.
+
   const setupNodeListeners = React.useCallback(
     (node: NodeWithEvents) => {
       const handleReady = () => {
@@ -117,6 +123,24 @@ export default function SignerPage() {
       };
       const handleMessage = (msg: any) => {
         const tag = typeof msg?.tag === 'string' ? msg.tag : 'message';
+
+        if (tag === '/echo/req' && nodeRef.current) {
+          const fromPubkey = typeof msg?.env?.pubkey === 'string' ? msg.env.pubkey : 'unknown';
+          void respondToEchoRequest(nodeRef.current, msg, (level, message, data) => {
+            const levelMap: Record<string, string> = { info: 'INFO', warn: 'WARN', debug: 'DEBUG', error: 'ERROR' };
+            addLog(levelMap[level] || 'INFO', message, data);
+          }).then((handled) => {
+            if (handled) {
+              addLog('ECHO', 'Responded to echo request', { from: fromPubkey, id: msg?.id });
+            } else {
+              addLog('INFO', 'Ignored echo request from unknown peer', { from: fromPubkey, id: msg?.id });
+            }
+          }).catch((error) => {
+            const message = error instanceof Error ? error.message : String(error);
+            addLog('WARN', 'Failed to handle echo request', message);
+          });
+        }
+
         if (EVENT_LABELS[tag]) {
           addLog(EVENT_LABELS[tag].level, EVENT_LABELS[tag].message, msg);
           return;
@@ -154,15 +178,39 @@ export default function SignerPage() {
     setRelays(normalized);
     setNodeStatus('connecting');
     try {
-      const node = (await startSignerNode({ group: share.group, share: share.share, relays: normalized })) as NodeWithEvents;
-      nodeRef.current = node;
+      // Create node WITHOUT connecting first
+      const node = createSignerNode({ group: share.group, share: share.share, relays: normalized }) as NodeWithEvents;
+
+      // Clean up any old handlers and set up new ones BEFORE connecting
+      // This prevents race conditions where messages arrive before handlers are attached
       cleanupRef.current?.();
+      nodeRef.current = node;
       cleanupRef.current = setupNodeListeners(node);
+
+      // NOW connect - handlers are ready to receive messages
+      await connectSignerNode(node);
 
       setNodeStatus('running');
       setNodeError(null);
       addLog('READY', 'Signer node ready');
       addLog('INFO', `Connected to ${normalized.length} relays`);
+
+      // Send echo to SELF (our own pubkey)
+      // igloo-desktop's awaitShareEcho uses the SAME share credentials, so it has the SAME pubkey
+      // Both can decrypt messages addressed to this pubkey (same private key from share)
+      const echoLogger = (level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: unknown) => {
+        const levelMap: Record<string, string> = { info: 'INFO', warn: 'WARN', debug: 'DEBUG', error: 'ERROR' };
+        addLog(levelMap[level] || 'INFO', message, data);
+      };
+
+      publishEchoToSelf(node, echoLogger).then((success) => {
+        if (success) {
+          addLog('ECHO', 'Echo published to self to announce presence');
+        }
+      }).catch((error) => {
+        const message = error instanceof Error ? error.message : 'Unknown echo error';
+        addLog('WARN', 'Echo error', message);
+      });
 
       const updatedPeers = await refreshPeerStatuses(node, share.group, share.share, peers.length ? peers : buildPeerList(share.group, share.share));
       setPeers(updatedPeers);
