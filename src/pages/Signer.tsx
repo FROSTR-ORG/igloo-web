@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { PeerList, type PeerPolicy } from '@/components/ui/peer-list';
 import { EventLog, type LogEntry } from '@/components/ui/event-log';
 import { type StatusState } from '@/components/ui/status-indicator';
+import { ConfirmModal } from '@/components/ui/confirm-modal';
 import {
   Check,
   ChevronDown,
@@ -14,6 +15,7 @@ import {
   Copy,
   HelpCircle,
   Plus,
+  Trash2,
   User,
   X
 } from 'lucide-react';
@@ -67,6 +69,7 @@ export default function SignerPage() {
   const [logs, setLogs] = React.useState<LogEntry[]>([]);
   const [nodeStatus, setNodeStatus] = React.useState<'stopped' | 'connecting' | 'running'>(share ? 'stopped' : 'stopped');
   const [nodeError, setNodeError] = React.useState<string | null>(null);
+  const [showClearModal, setShowClearModal] = React.useState(false);
   const nodeRef = React.useRef<NodeWithEvents | null>(null);
   const cleanupRef = React.useRef<(() => void) | null>(null);
 
@@ -296,6 +299,11 @@ export default function SignerPage() {
   const isConnecting = nodeStatus === 'connecting';
   const canStart = share && relays.length > 0;
 
+  const handleClearCredentials = () => {
+    setShowClearModal(false);
+    logout();
+  };
+
   if (!share) {
     return (
       <PageLayout header={<AppHeader title="igloo web" />}>
@@ -316,8 +324,9 @@ export default function SignerPage() {
         <AppHeader
           title="igloo web"
           right={
-            <Button variant="ghost" size="sm" onClick={logout}>
-              Log out
+            <Button variant="ghost" size="sm" onClick={() => setShowClearModal(true)}>
+              <Trash2 className="h-4 w-4 mr-1.5" />
+              Clear Credentials
             </Button>
           }
         />
@@ -526,6 +535,17 @@ export default function SignerPage() {
           />
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={showClearModal}
+        title="Clear All Credentials?"
+        message="This will permanently delete your stored credentials from this browser. If you haven't backed up your group and share credentials, they will be lost forever. This action cannot be undone."
+        confirmLabel="Clear Credentials"
+        cancelLabel="Keep Credentials"
+        onConfirm={handleClearCredentials}
+        onCancel={() => setShowClearModal(false)}
+        variant="danger"
+      />
     </PageLayout>
   );
 }

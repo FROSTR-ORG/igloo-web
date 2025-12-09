@@ -71,6 +71,7 @@ export default function OnboardingPage() {
   const [share, setShare] = React.useState('');
   const [showShare, setShowShare] = React.useState(false);
   const [password, setPassword] = React.useState('');
+  const [confirmPassword, setConfirmPassword] = React.useState('');
   const [relays, setRelays] = React.useState<string>(DEFAULT_RELAYS.join('\n'));
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -85,7 +86,8 @@ export default function OnboardingPage() {
     [group, share, groupValidation.isValid, shareValidation.isValid]
   );
 
-  const canSave = keysetName.trim().length > 0 && groupValidation.isValid && shareValidation.isValid && password.trim().length >= 6 && relayState.relays.length > 0;
+  const passwordsMatch = password === confirmPassword;
+  const canSave = keysetName.trim().length > 0 && groupValidation.isValid && shareValidation.isValid && password.trim().length >= 6 && passwordsMatch && relayState.relays.length > 0;
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
@@ -163,8 +165,13 @@ export default function OnboardingPage() {
             </div>
             <div className="space-y-1.5">
               <Label className="text-sm text-blue-300">Encryption Password</Label>
-              <Input type="password" placeholder="Choose a password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <Input type="password" placeholder="Choose a password (min 6 characters)" value={password} onChange={(e) => setPassword(e.target.value)} required />
               <p className="text-xs text-gray-500">Used only to encrypt/decrypt locally</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm text-blue-300">Confirm Password</Label>
+              <Input type="password" placeholder="Confirm your password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required />
+              {confirmPassword && !passwordsMatch && <p className="text-xs text-red-400">Passwords do not match</p>}
             </div>
             {diagnostics.summary && (
               <div className="rounded border border-green-500/20 bg-green-500/5 px-3 py-2.5 text-sm">
