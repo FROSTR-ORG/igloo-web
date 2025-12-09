@@ -430,32 +430,22 @@ export function detachEvent(node: NodeWithEvents, event: string, handler: (...ar
   }
 }
 
+/**
+ * Gets the Web Crypto API for secure random number generation.
+ * This is a web app, so browser crypto is always available.
+ */
 function getSecureCrypto(): Crypto {
-  const globalCrypto = typeof globalThis !== 'undefined' ? (globalThis as any).crypto : undefined;
-  if (globalCrypto?.getRandomValues) {
-    return globalCrypto as Crypto;
+  // Modern browsers: globalThis.crypto
+  if (typeof globalThis !== 'undefined' && globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function') {
+    return globalThis.crypto;
   }
 
-  const nodeWebcrypto = tryGetNodeWebcrypto();
-  if (nodeWebcrypto?.getRandomValues) {
-    return nodeWebcrypto;
+  // Fallback for older browser globals
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    return crypto;
   }
 
-  throw new Error('Secure randomness unavailable: crypto.getRandomValues is required to generate echo challenges.');
-}
-
-function tryGetNodeWebcrypto(): Crypto | undefined {
-  try {
-    // Use eval to avoid bundlers eagerly pulling in the Node crypto module in browsers.
-    const nodeRequire = (0, eval)('require') as undefined | ((id: string) => any);
-    if (typeof nodeRequire === 'function') {
-      const { webcrypto } = nodeRequire('crypto') ?? {};
-      if (webcrypto?.getRandomValues) return webcrypto as Crypto;
-    }
-  } catch {
-    // ignore; caller will throw a clear error when no secure RNG is available
-  }
-  return undefined;
+  throw new Error('Secure randomness unavailable: crypto.getRandomValues is required.');
 }
 
 function generateEchoChallenge(byteLength = 32): string {
