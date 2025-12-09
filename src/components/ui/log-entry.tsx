@@ -16,6 +16,7 @@ const levelColors: Record<string, string> = {
   ERROR: 'text-red-400',
   SIGN: 'text-cyan-400',
   ECDH: 'text-purple-400',
+  ECHO: 'text-emerald-400',
   PING: 'text-yellow-400'
 };
 
