@@ -37,8 +37,8 @@ export const OnboardingInstructions: React.FC<OnboardingInstructionsProps> = ({ 
       <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-4 space-y-3">
         <h3 className="text-sm font-semibold text-amber-200">Before You Start</h3>
         <p className="text-sm text-amber-100/80 leading-relaxed">
-          You'll need a <span className="font-medium text-amber-200">FROSTR keyset</span> (group credential + share credential) to configure this signer.
-          Generate one using Igloo Desktop or CLI, then bring a share here.
+          You will need a <span className="font-medium text-amber-200">v2 onboarding package</span> (`bfonboard1...`).
+          Generate it from your issuer device (Igloo Desktop or CLI) and paste it here.
         </p>
         <div className="flex flex-wrap gap-2 pt-1">
           <a

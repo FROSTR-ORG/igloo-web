@@ -29,9 +29,17 @@ export function PeerList({ peers, onPing, onPolicyChange, onRefreshAll, disabled
   return (
     <div className="border border-blue-900/30 rounded-lg overflow-hidden">
       {/* Header */}
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
         onClick={() => setCollapsed(!collapsed)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            setCollapsed((prev) => !prev);
+          }
+        }}
         className="w-full flex items-center justify-between px-4 py-3 bg-gray-800/30 hover:bg-gray-800/50 transition-colors"
       >
         <div className="flex items-center gap-3">
@@ -69,7 +77,7 @@ export function PeerList({ peers, onPing, onPolicyChange, onRefreshAll, disabled
             />
           )}
         </div>
-      </button>
+      </div>
 
       {/* Content */}
       {!collapsed && (

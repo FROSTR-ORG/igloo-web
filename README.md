@@ -1,36 +1,73 @@
 # igloo-web
-Browser-first FROSTR signer built with React/Vite, `@frostr/igloo-core`, and `@frostr/bifrost`. Runs entirely in your tab; your share stays encrypted in localStorage.
+Web UI for the v2 `bifrost-rs` signer runtime hosted in the browser via WASM.
 
-## How it fits
-- FROSTR splits an nsec into k-of-n shares and coordinates signing over Nostr relays via bifrost nodes.  
-- Igloo apps: 
-  - igloo-desktop (generate/manage shares)
-  - frost2x (browser extension)
-  - igloo-server (always-on signer)
-  - igloo-web is the lightweight, no-install signer you can spin up in any browser.
-- `@frostr/igloo-core` is the app-facing wrapper: it exposes credential/relay/peer helpers and a thin API for spinning up bifrost nodes so every Igloo app shares the same behavior. It saves app builders from wiring nostr-p2p/frost directly.
-- `@frostr/bifrost` is the reference FROSTR node: it rides on cmdruid’s `@cmdcode/nostr-p2p` (nostr relay SDK) and `@cmdcode/frost` (threshold Schnorr lib); igloo-core layers on top instead of re-implementing those pieces.
-- The FROSTR protocol itself lives in `frostr-org/frostr`; bifrost and all Igloo apps track that spec.
-- Handy links: [protocol spec](https://github.com/frostr-org/frostr), [transport](https://github.com/cmdruid/nostr-p2p), [threshold lib](https://github.com/cmdruid/frost).
+## v2 Hard Cut
+- Legacy `bfgroup`/`bfshare` onboarding is removed.
+- Onboarding now uses a `bfonboard1...` package.
+- Runtime now uses:
+  - `bifrost-bridge-core` + `bifrost-bridge-wasm` (Rust, compiled to WASM)
+  - TypeScript Nostr client (`nostr-tools`) for relay ingress/egress
+- There is no v1 compatibility layer.
 
-## Features
-- Guided onboarding validates `bfgroup`/`bfshare` creds before saving; relays are normalized and stored with an optional keyset name.
-- Encrypts group/share + relay list with password-protected AES-GCM; quick unlock flow on revisit.
-- Start/stop the signer node with configurable relays; auto-publishes an echo to self, responds to `/echo/req`, and shows decoded credential JSON on demand.
-- Peer list with allow/block policy per peer, ping + latency checks, status refresh; event log for `/sign`, `/ecdh`, `/ping`, echo events (kept to 200 entries).
-- Clipboard helpers, relay add/remove, and a “Clear credentials” safety modal.
+## WASM Artifacts
+`igloo-web` dynamically loads:
+- `/wasm/bifrost_bridge_wasm.js`
+- `/wasm/bifrost_bridge_wasm_bg.wasm`
+
+Build/copy artifacts into `public/wasm`:
+- `npm run build:bridge-wasm`
+
+Prerequisites:
+- `rustup target add wasm32-unknown-unknown`
+- `wasm-pack`
+- `clang` (required by secp256k1 build for wasm target)
+
+Regenerate artifacts whenever runtime or wire behavior changes in:
+- `repos/bifrost-rs/crates/bifrost-bridge-core`
+- `repos/bifrost-rs/crates/bifrost-bridge-wasm`
+- `repos/bifrost-rs/crates/bifrost-signer`
+- `repos/bifrost-rs/crates/bifrost-codec`
+
+## Environment
+- `VITE_BIFROST_EVENT_KIND` (default: `20000`)
 
 ## Quick start (dev)
 - `npm install`
+- `npm run build:bridge-wasm`
 - `npm run dev` then open [http://localhost:5173](http://localhost:5173)
-- `npm run build` → production assets in `dist/`; `npm run preview` to smoke-test the build.
+- `npm run build`
 
-## Using the signer
-1. Generate a FROSTR keyset in Igloo Desktop or CLI and copy one `bfgroup` + `bfshare`.
-2. Paste credentials here, choose a password to encrypt the bundle, set relays (defaults: `wss://relay.primal.net`, `wss://relay.damus.io`).
-3. Start the signer and keep the tab open so peers can reach you over shared relays.
-4. Adjust peer policies or relays as needed; clear credentials when retiring this node.
+## Automated tests
+- `npm run test:int`
+  - headless integration test for local relay + scripted peer actor handshake (`OnboardRequest`/`PingRequest`)
+- `npm run test:e2e`
+  - Playwright browser smoke test for onboarding -> signer screen -> policy toggle
+- `npm run test:ci`
+  - runs wasm build, integration tests, browser smoke, and production build
 
-## Notes
-- Everything runs client-side; no server required.
-- Ensure at least one common relay with your other signers for successful rounds.
+Notes:
+- Browser smoke uses real WASM runtime and a local relay + peer actor harness.
+- CI installs Chromium and runs these checks as PR gates (`.github/workflows/igloo-web-v2.yml`).
+
+## Contributor hygiene
+- Do not commit `dist/` or `*.tsbuildinfo`.
+- Commit updated `public/wasm/*` artifacts when bridge/runtime changes affect browser behavior.
+
+## Onboarding flow
+1. Generate a v2 onboarding package (`bfonboard1...`) from your issuer device.
+2. Paste it in onboarding (or launch with `?onboard=<bfonboard...>`), set relays.
+3. Click `Connect and Continue` on onboarding.
+4. On successful connect, app routes to Signer page.
+4. Monitor peer status and event log in-app.
+
+## Demo bootstrap script
+From repo root:
+- `scripts/start-igloo-web-demo.sh`
+
+Useful flags:
+- `FORCE_WASM_BUILD=1 scripts/start-igloo-web-demo.sh`
+- `FORCE_KEYGEN=1 scripts/start-igloo-web-demo.sh`
+- `FORCE_WASM_BUILD=1 FORCE_KEYGEN=1 scripts/start-igloo-web-demo.sh`
+
+Script output includes:
+- `Onboard URL: http://127.0.0.1:5173/?onboard=...` for autofill onboarding.

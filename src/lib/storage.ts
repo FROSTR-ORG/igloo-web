@@ -1,9 +1,7 @@
-import { decryptBundle, encryptBundle, type EncryptedBundle } from './crypto';
 import { normalizeRelays } from './igloo';
 
-export type StoredShare = {
-  group: string;
-  share: string;
+export type StoredProfile = {
+  onboardPackage: string;
   relays: string[];
   keysetName?: string;
 };
@@ -14,29 +12,27 @@ export type StoredPeerPolicy = {
   receive: boolean;
 };
 
-const STORAGE_KEY = 'igloo.vault';
+const STORAGE_KEY = 'igloo.v2.profile';
 const POLICIES_KEY = 'igloo.policies';
 
-export function hasStoredShare(): boolean {
+export function hasStoredProfile(): boolean {
   return !!localStorage.getItem(STORAGE_KEY);
 }
 
-export async function saveStoredShare(password: string, data: StoredShare): Promise<void> {
+export function saveStoredProfile(data: StoredProfile): void {
   const { relays } = normalizeRelays(data.relays);
-  const bundle = await encryptBundle(password, { ...data, relays });
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(bundle));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...data, relays }));
 }
 
-export async function loadStoredShare(password: string): Promise<StoredShare> {
+export function loadStoredProfile(): StoredProfile {
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) throw new Error('No saved share');
-  const bundle = JSON.parse(raw) as EncryptedBundle;
-  const payload = await decryptBundle<StoredShare>(password, bundle);
+  if (!raw) throw new Error('No saved profile');
+  const payload = JSON.parse(raw) as StoredProfile;
   const { relays } = normalizeRelays(payload.relays ?? []);
   return { ...payload, relays };
 }
 
-export function clearStoredShare() {
+export function clearStoredProfile() {
   localStorage.removeItem(STORAGE_KEY);
 }
 
