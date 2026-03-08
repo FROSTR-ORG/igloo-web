@@ -41,11 +41,12 @@ Regenerate artifacts whenever runtime or wire behavior changes in:
 - `npm run test:int`
   - headless integration test for local relay + scripted peer actor handshake (`OnboardRequest`/`PingRequest`)
 - `npm run test:e2e`
-  - Playwright browser smoke test for onboarding -> signer screen -> policy toggle
+  - proxies to the infra-owned Playwright browser smoke suite in `../../test/igloo-web`
 - `npm run test:ci`
   - runs wasm build, integration tests, browser smoke, and production build
 
 Notes:
+- Browser smoke source now lives in `../../test/igloo-web`.
 - Browser smoke uses real WASM runtime and a local relay + peer actor harness.
 - CI installs Chromium and runs these checks as PR gates (`.github/workflows/igloo-web-v2.yml`).
 

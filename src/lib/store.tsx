@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
 import {
+  clearRuntimeSnapshot,
   clearStoredProfile,
   hasStoredProfile,
   loadStoredProfile,
+  saveRuntimeSnapshot,
   saveStoredProfile,
   type StoredProfile
 } from './storage';
@@ -10,12 +12,22 @@ import {
   DEFAULT_RELAYS,
   createSignerNode,
   connectSignerNode,
+  decodeOnboardingProfile,
+  getPublicKeyFromNode,
+  getRuntimeSnapshot,
   normalizeRelays,
   stopSignerNode,
   type NodeWithEvents
 } from './igloo';
 
 export type AppRoute = 'onboarding' | 'signer';
+
+type OnboardingConnectInput = {
+  keysetName?: string;
+  onboardPackage: string;
+  onboardPassword: string;
+  relays: string[];
+};
 
 type AppState = {
   route: AppRoute;
@@ -25,7 +37,7 @@ type AppState = {
   activeNode: NodeWithEvents | null;
   setActiveNode: (node: NodeWithEvents | null) => void;
   saveProfile: (s: StoredProfile) => Promise<void>;
-  connectOnboarding: (s: StoredProfile) => Promise<void>;
+  connectOnboarding: (s: OnboardingConnectInput) => Promise<void>;
   logout: () => void;
 };
 
@@ -52,20 +64,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setRoute('signer');
   }
 
-  async function connectOnboarding(s: StoredProfile) {
+  async function connectOnboarding(s: OnboardingConnectInput) {
     const { relays } = normalizeRelays(s.relays ?? DEFAULT_RELAYS);
-    const payload = { ...s, relays };
+    const decoded = await decodeOnboardingProfile(s.onboardPackage, s.onboardPassword);
 
     stopSignerNode(activeNode);
     setActiveNode(null);
 
     const node = createSignerNode({
-      onboardPackage: payload.onboardPackage,
-      relays: payload.relays
+      mode: 'onboarding',
+      onboardPackage: s.onboardPackage,
+      onboardPassword: s.onboardPassword,
+      relays
     });
 
     try {
       await connectSignerNode(node);
+      saveRuntimeSnapshot(JSON.stringify(getRuntimeSnapshot(node)));
+      const payload = {
+        keysetName: s.keysetName?.trim(),
+        relays,
+        groupPublicKey: getPublicKeyFromNode(node),
+        publicKey: getPublicKeyFromNode(node),
+        peerPubkey: decoded.peerPubkey
+      };
       saveStoredProfile(payload);
       setProfile(payload);
       setActiveNode(node);
@@ -80,6 +102,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     stopSignerNode(activeNode);
     setActiveNode(null);
     setProfile(undefined);
+    clearRuntimeSnapshot();
     clearStoredProfile();
     setRoute('onboarding');
   }

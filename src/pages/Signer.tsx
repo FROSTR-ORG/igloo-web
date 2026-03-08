@@ -7,13 +7,14 @@ import { Input } from '@/components/ui/input';
 import { PeerList, type PeerPolicy } from '@/components/ui/peer-list';
 import { EventLog, type LogEntry } from '@/components/ui/event-log';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
-import { Check, Copy, HelpCircle, Trash2, User, X } from 'lucide-react';
+import { Copy, HelpCircle, Trash2, User, X } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import {
   DEFAULT_RELAYS,
   createSignerNode,
   connectSignerNode,
   detachEvent,
+  getPublicKeyFromNode,
   normalizeRelays,
   pingSinglePeer,
   refreshPeerStatuses,
@@ -21,7 +22,7 @@ import {
   stopSignerNode,
   type NodeWithEvents
 } from '@/lib/igloo';
-import { loadPeerPolicies, savePeerPolicies } from '@/lib/storage';
+import { loadPeerPolicies, loadRuntimeSnapshot, savePeerPolicies } from '@/lib/storage';
 
 const MAX_LOGS = 200;
 
@@ -51,7 +52,7 @@ function readTag(msg: unknown): string {
 
 export default function SignerPage() {
   const { profile, logout, activeNode, setActiveNode } = useStore();
-  const [copiedOnboard, setCopiedOnboard] = React.useState(false);
+  const [copiedPublicKey, setCopiedPublicKey] = React.useState(false);
   const [relays, setRelays] = React.useState<string[]>(
     profile?.relays?.length ? profile.relays : DEFAULT_RELAYS
   );
@@ -203,9 +204,14 @@ export default function SignerPage() {
     setNodeStatus('connecting');
 
     try {
+      const runtimeSnapshotJson = loadRuntimeSnapshot();
+      if (!runtimeSnapshotJson) {
+        throw new Error('No local signer snapshot found. Re-import your onboarding package.');
+      }
       const node = createSignerNode({
-        onboardPackage: profile.onboardPackage,
-        relays: normalized
+        mode: 'persisted',
+        relays: normalized,
+        runtimeSnapshotJson
       });
 
       cleanupRef.current?.();
@@ -311,14 +317,16 @@ export default function SignerPage() {
     [addLog, nodeStatus, peers]
   );
 
-  const handleCopyOnboard = async () => {
-    if (!profile) return;
+  const handleCopyPublicKey = async () => {
+    const value =
+      (nodeRef.current ? getPublicKeyFromNode(nodeRef.current) : null) ?? profile?.groupPublicKey;
+    if (!value) return;
     try {
-      await navigator.clipboard.writeText(profile.onboardPackage);
-      setCopiedOnboard(true);
-      setTimeout(() => setCopiedOnboard(false), 2000);
+      await navigator.clipboard.writeText(value);
+      setCopiedPublicKey(true);
+      setTimeout(() => setCopiedPublicKey(false), 2000);
     } catch (err) {
-      console.error('Failed to copy onboarding package', err);
+      console.error('Failed to copy public key', err);
     }
   };
 
@@ -387,25 +395,27 @@ export default function SignerPage() {
           </div>
 
           <div className="space-y-1.5">
-            <LabelRow label="Onboarding Package" />
+            <LabelRow label="Group Public Key" />
             <div className="flex">
               <Input
                 type="text"
-                value={profile.onboardPackage}
+                value={profile.groupPublicKey || ''}
                 className="bg-gray-800/50 border-gray-700/50 text-blue-300 py-2 text-sm w-full font-mono"
                 readOnly
-                disabled={isSignerRunning || isConnecting}
               />
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={handleCopyOnboard}
+                onClick={handleCopyPublicKey}
                 className="ml-2 bg-blue-800/30 text-blue-400 hover:text-blue-300 hover:bg-blue-800/50"
-                title="Copy onboarding package"
+                title="Copy public key"
               >
-                {copiedOnboard ? <Check className="h-5 w-5" /> : <Copy className="h-5 w-5" />}
+                <Copy className="h-5 w-5" />
               </Button>
             </div>
+            {copiedPublicKey && (
+              <div className="text-xs text-blue-300">Public key copied</div>
+            )}
           </div>
 
           <div className="flex items-center justify-between mt-2">
@@ -500,7 +510,7 @@ export default function SignerPage() {
       <ConfirmModal
         isOpen={showClearModal}
         title="Clear Onboarding Profile?"
-        message="This will delete your saved onboarding package and relay configuration from this browser. This action cannot be undone."
+        message="This will delete your saved signer metadata, relay configuration, and runtime snapshot from this browser. This action cannot be undone."
         confirmLabel="Clear Profile"
         cancelLabel="Keep Profile"
         onConfirm={handleClearProfile}

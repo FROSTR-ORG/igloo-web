@@ -1,4 +1,4 @@
-import { SimplePool, finalizeEvent, nip44, type Event, type Filter } from 'nostr-tools';
+import { SimplePool, finalizeEvent, getPublicKey, nip44, type Event, type Filter } from 'nostr-tools';
 
 import type { PeerPolicy } from '@/components/ui/peer-list';
 import {
@@ -35,8 +35,11 @@ const PING_TIMEOUT_MS = 12_000;
 const PEER_ONLINE_GRACE_SECS = 120;
 
 type RuntimeConfig = {
-  onboardPackage: string;
+  mode: 'onboarding' | 'persisted';
   relays: string[];
+  onboardPackage?: string;
+  onboardPassword?: string;
+  runtimeSnapshotJson?: string | null;
 };
 
 type OnboardingDecoded = {
@@ -44,8 +47,27 @@ type OnboardingDecoded = {
     idx: number;
     seckey: string;
   };
-  share_pubkey33: string;
+  share_pubkey32: string;
   peer_pk_xonly: string;
+  relays: string[];
+  challenge_hex32?: string;
+};
+
+type RuntimeSnapshotWire = {
+  bootstrap: {
+    group: GroupPackageWire;
+    share: {
+      idx: number;
+      seckey: string;
+    };
+    peers: string[];
+  };
+  state_hex: string;
+};
+
+export type DecodedOnboardingProfile = {
+  publicKey: string;
+  peerPubkey: string;
   relays: string[];
 };
 
@@ -91,6 +113,17 @@ export type NodeWithEvents = {
   removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
 };
 
+export function validateOnboardingPassword(value: string): ValidationResult {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { isValid: false, error: 'Password is required' };
+  }
+  if (trimmed.length < 8) {
+    return { isValid: false, error: 'Password must be at least 8 characters' };
+  }
+  return { isValid: true };
+}
+
 type PeerPolicyPatch = {
   send: boolean;
   receive: boolean;
@@ -101,6 +134,13 @@ type PendingPing = {
   startedAtMs: number;
   resolve: (value: PingResult) => void;
 };
+
+function buildRequestId(idx: number): string {
+  const ts = nowUnixSecs();
+  const boot = Date.now();
+  const seq = Math.floor(Math.random() * 1_000_000_000);
+  return `${ts}-${idx}-${boot}-${seq}`;
+}
 
 const ensureArray = (value: string[]) =>
   Array.from(new Set(value.map((relay) => relay.replace(/\/$/, ''))));
@@ -133,6 +173,17 @@ function withContext(step: string, error: unknown): Error {
 
 function isRelayUrl(value: string): boolean {
   return /^wss?:\/\/.+/.test(value);
+}
+
+function normalizePubkey32Hex(value: string, label: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(normalized)) {
+    return normalized;
+  }
+  if (/^(02|03)[0-9a-f]{64}$/.test(normalized)) {
+    return normalized.slice(2);
+  }
+  throw new Error(`Invalid ${label}`);
 }
 
 function hexToBytes(value: string): Uint8Array {
@@ -193,9 +244,10 @@ class BrowserBridgeNode implements NodeWithEvents {
   private runtime: WasmBridgeRuntimeApi | null = null;
 
   private activeRelays: string[] = [];
-  private localPubkey33 = '';
-  private peerPubkeys33 = new Set<string>();
-  private xonlyToPeer33 = new Map<string, string>();
+  private localPubkey32 = '';
+  private groupPubkey32 = '';
+  private peerPubkeys32 = new Set<string>();
+  private xonlyToPeer32 = new Map<string, string>();
   private peerLastSeenAt = new Map<string, number>();
   private pendingPings: PendingPing[] = [];
 
@@ -230,44 +282,26 @@ class BrowserBridgeNode implements NodeWithEvents {
       throw withContext('Failed to load WASM runtime', error);
     }
 
-    let decoded: OnboardingDecoded;
-    try {
-      decoded = this.decodeOnboardingPackage(this.config.onboardPackage);
-    } catch (error) {
-      throw withContext('Failed to decode onboarding package', error);
+    let decoded: OnboardingDecoded | null = null;
+    if (this.config.mode === 'onboarding') {
+      try {
+        decoded = this.decodeOnboardingPackage(
+          this.config.onboardPackage ?? '',
+          this.config.onboardPassword ?? ''
+        );
+      } catch (error) {
+        throw withContext('Failed to decode onboarding package', error);
+      }
+      this.localPubkey32 = decoded.share_pubkey32.toLowerCase();
     }
-    this.localPubkey33 = decoded.share_pubkey33.toLowerCase();
 
-    const mergedRelays = normalizeRelays([...this.config.relays, ...decoded.relays]);
+    const mergedRelays = normalizeRelays([
+      ...this.config.relays,
+      ...(decoded?.relays ?? [])
+    ]);
     this.activeRelays = mergedRelays.relays;
 
     this.pool = new SimplePool();
-
-    let onboardResponse: OnboardResponseWire;
-    try {
-      onboardResponse = await this.requestOnboardResponse(decoded);
-    } catch (error) {
-      throw withContext('Failed during onboard request', error);
-    }
-    const group = onboardResponse.group;
-
-    this.peerPubkeys33 = new Set(
-      group.members
-        .map((member) => member.pubkey.toLowerCase())
-        .filter((pubkey) => pubkey !== this.localPubkey33)
-    );
-
-    this.xonlyToPeer33.clear();
-    for (const member of group.members) {
-      const peer33 = member.pubkey.toLowerCase();
-      this.xonlyToPeer33.set(peer33.slice(2), peer33);
-    }
-
-    const bootstrap = {
-      group,
-      share: decoded.share,
-      peers: Array.from(this.peerPubkeys33)
-    };
 
     const runtimeConfig = {
       device: {
@@ -278,37 +312,71 @@ class BrowserBridgeNode implements NodeWithEvents {
         request_ttl_secs: 300,
         max_future_skew_secs: 30,
         request_cache_limit: 2048,
+        ecdh_cache_capacity: 256,
+        ecdh_cache_ttl_secs: 300,
+        sig_cache_capacity: 256,
+        sig_cache_ttl_secs: 120,
         state_save_interval_secs: 30,
         event_kind: BIFROST_EVENT_KIND,
         peer_selection_strategy: 'deterministic_sorted'
       }
     };
 
-    try {
-      this.runtime.init_runtime(JSON.stringify(runtimeConfig), JSON.stringify(bootstrap));
-    } catch (error) {
-      throw withContext('Failed to initialize signer runtime', error);
+    if (this.config.mode === 'persisted') {
+      const snapshot = this.parseRuntimeSnapshot();
+      try {
+        this.localPubkey32 = normalizePubkey32Hex(
+          getPublicKey(hexToBytes(snapshot.bootstrap.share.seckey)),
+          'share public key'
+        );
+        this.applyGroupState(snapshot.bootstrap.group);
+        this.runtime.restore_runtime(
+          JSON.stringify(runtimeConfig),
+          this.config.runtimeSnapshotJson ?? ''
+        );
+      } catch (error) {
+        throw withContext('Failed to restore signer runtime', error);
+      }
+    } else {
+      let onboardResponse: OnboardResponseWire;
+      try {
+        onboardResponse = await this.requestOnboardResponse(decoded!);
+      } catch (error) {
+        throw withContext('Failed during onboard request', error);
+      }
+      const bootstrap = {
+        group: onboardResponse.group,
+        share: decoded!.share,
+        peers: this.applyGroupState(onboardResponse.group)
+      };
+
+      try {
+        this.runtime.init_runtime(JSON.stringify(runtimeConfig), JSON.stringify(bootstrap));
+      } catch (error) {
+        throw withContext('Failed to initialize signer runtime', error);
+      }
     }
 
     this.subscribeRelayIngress();
 
     this.tickHandle = setInterval(() => {
-      this.pumpRuntime(nowUnixSecs());
+      this.pumpRuntime(Date.now());
     }, 1_000);
 
-    this.pumpRuntime(nowUnixSecs());
+    this.pumpRuntime(Date.now());
 
-    for (const peer of this.peerPubkeys33) {
+    for (const peer of this.peerPubkeys32) {
       this.runtime.handle_command(
-        JSON.stringify({ type: 'ping', peer_pubkey33_hex: peer })
+        JSON.stringify({ type: 'ping', peer_pubkey32_hex: peer })
       );
     }
-    this.pumpRuntime(nowUnixSecs());
+    this.pumpRuntime(Date.now());
 
     this.emit('message', {
       tag: '/runtime/bootstrap',
       relays: this.activeRelays,
-      peers: Array.from(this.peerPubkeys33),
+      peers: Array.from(this.peerPubkeys32),
+      public_key: this.groupPubkey32,
       event_kind: BIFROST_EVENT_KIND
     });
 
@@ -369,7 +437,7 @@ class BrowserBridgeNode implements NodeWithEvents {
       });
     }
 
-    for (const peer of this.peerPubkeys33) {
+    for (const peer of this.peerPubkeys32) {
       if (!base.has(peer)) {
         base.set(peer, {
           alias: `Peer ${base.size + 1}`,
@@ -421,9 +489,9 @@ class BrowserBridgeNode implements NodeWithEvents {
 
       try {
         this.runtime?.handle_command(
-          JSON.stringify({ type: 'ping', peer_pubkey33_hex: normalized })
+          JSON.stringify({ type: 'ping', peer_pubkey32_hex: normalized })
         );
-        this.pumpRuntime(nowUnixSecs());
+        this.pumpRuntime(Date.now());
       } catch (error) {
         const index = this.pendingPings.indexOf(pending);
         if (index >= 0) this.pendingPings.splice(index, 1);
@@ -443,15 +511,39 @@ class BrowserBridgeNode implements NodeWithEvents {
       })
     );
 
-    this.pumpRuntime(nowUnixSecs());
+    this.pumpRuntime(Date.now());
   }
 
-  private decodeOnboardingPackage(value: string): OnboardingDecoded {
+  getPublicKey(): string {
+    if (!this.groupPubkey32) {
+      throw new Error('runtime not initialized');
+    }
+    return this.groupPubkey32;
+  }
+
+  snapshotRuntimeState(): unknown {
+    if (!this.runtime) {
+      throw new Error('runtime not initialized');
+    }
+    return JSON.parse(this.runtime.snapshot_state_json());
+  }
+
+  runtimeStatus(): unknown {
+    if (!this.runtime) {
+      throw new Error('runtime not initialized');
+    }
+    return JSON.parse(this.runtime.status_json());
+  }
+
+  private decodeOnboardingPackage(value: string, password: string): OnboardingDecoded {
     if (!this.runtime) {
       throw new Error('runtime not initialized');
     }
 
-    const decodedJson = this.runtime.decode_onboarding_package_json(value.trim());
+    const decodedJson = this.runtime.decode_onboarding_package_json_with_password(
+      value.trim(),
+      password
+    );
     const decoded = JSON.parse(decodedJson) as unknown;
     if (!isRecord(decoded)) {
       throw new Error('Invalid onboarding package decode result');
@@ -463,14 +555,15 @@ class BrowserBridgeNode implements NodeWithEvents {
 
     const idx = decoded.share.idx;
     const seckey = decoded.share.seckey;
-    const sharePubkey33 = decoded.share_pubkey33;
+    const sharePubkey32 = decoded.share_pubkey32;
     const peerPkXonly = decoded.peer_pk_xonly;
     const relays = decoded.relays;
+    const challengeHex32 = decoded.challenge_hex32;
 
     if (typeof idx !== 'number' || typeof seckey !== 'string') {
       throw new Error('Invalid onboarding share payload');
     }
-    if (typeof sharePubkey33 !== 'string' || sharePubkey33.length !== 66) {
+    if (typeof sharePubkey32 !== 'string' || sharePubkey32.length !== 64) {
       throw new Error('Invalid onboarding share pubkey');
     }
     if (typeof peerPkXonly !== 'string' || peerPkXonly.length !== 64) {
@@ -479,12 +572,46 @@ class BrowserBridgeNode implements NodeWithEvents {
 
     return {
       share: { idx, seckey },
-      share_pubkey33: sharePubkey33,
+      share_pubkey32: sharePubkey32,
       peer_pk_xonly: peerPkXonly,
       relays: Array.isArray(relays)
         ? relays.filter((relay): relay is string => typeof relay === 'string')
-        : []
+        : [],
+      ...(typeof challengeHex32 === 'string' ? { challenge_hex32: challengeHex32 } : {})
     };
+  }
+
+  private applyGroupState(group: GroupPackageWire): string[] {
+    this.groupPubkey32 = normalizePubkey32Hex(group.group_pk, 'group public key');
+    this.peerPubkeys32 = new Set(
+      group.members
+        .map((member) => normalizePubkey32Hex(member.pubkey, `group member ${member.idx} pubkey`))
+        .filter((pubkey) => pubkey !== this.localPubkey32)
+    );
+
+    this.xonlyToPeer32.clear();
+    for (const member of group.members) {
+      const peer32 = normalizePubkey32Hex(member.pubkey, `group member ${member.idx} pubkey`);
+      this.xonlyToPeer32.set(peer32, peer32);
+    }
+
+    return Array.from(this.peerPubkeys32);
+  }
+
+  private parseRuntimeSnapshot(): RuntimeSnapshotWire {
+    const snapshotJson = this.config.runtimeSnapshotJson;
+    if (typeof snapshotJson !== 'string' || !snapshotJson.trim()) {
+      throw new Error('missing runtime snapshot');
+    }
+
+    const parsed = JSON.parse(snapshotJson) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.bootstrap) || !isRecord(parsed.bootstrap.group)) {
+      throw new Error('invalid runtime snapshot');
+    }
+    if (typeof parsed.state_hex !== 'string' || !parsed.state_hex.trim()) {
+      throw new Error('runtime snapshot is missing state_hex');
+    }
+    return parsed as RuntimeSnapshotWire;
   }
 
   private async requestOnboardResponse(
@@ -493,17 +620,18 @@ class BrowserBridgeNode implements NodeWithEvents {
     if (!this.pool) throw new Error('relay pool not initialized');
 
     const now = nowUnixSecs();
-    const requestId = `${now}-${decoded.share.idx}-1`;
+    const requestId = buildRequestId(decoded.share.idx);
     const shareSecret = hexToBytes(decoded.share.seckey);
 
     const requestEnvelope: BridgeEnvelope = {
       request_id: requestId,
       sent_at: now,
       payload: {
-        type: 'OnboardRequest',
-        data: {
-          share_pk: decoded.share_pubkey33.toLowerCase(),
-          idx: decoded.share.idx
+          type: 'OnboardRequest',
+          data: {
+          share_pk: decoded.share_pubkey32.toLowerCase(),
+          idx: decoded.share.idx,
+          ...(decoded.challenge_hex32 ? { challenge: decoded.challenge_hex32.toLowerCase() } : {})
         }
       }
     };
@@ -513,11 +641,12 @@ class BrowserBridgeNode implements NodeWithEvents {
       decoded.peer_pk_xonly
     );
 
-    const filter: Filter = {
+    const filter = {
       kinds: [BIFROST_EVENT_KIND],
       authors: [decoded.peer_pk_xonly],
+      '#p': [decoded.share_pubkey32.toLowerCase()],
       since: now - 5
-    };
+    } as Filter;
 
     return await new Promise<OnboardResponseWire>((resolve, reject) => {
       let settled = false;
@@ -580,7 +709,7 @@ class BrowserBridgeNode implements NodeWithEvents {
       const event = finalizeEvent(
         {
           kind: BIFROST_EVENT_KIND,
-          tags: [],
+          tags: [['p', decoded.peer_pk_xonly.toLowerCase()]],
           content: encrypted,
           created_at: now
         },
@@ -608,22 +737,23 @@ class BrowserBridgeNode implements NodeWithEvents {
   private subscribeRelayIngress() {
     if (!this.pool) throw new Error('relay pool not initialized');
 
-    const authors = Array.from(this.xonlyToPeer33.keys());
-    const filter: Filter = {
+    const authors = Array.from(this.xonlyToPeer32.keys());
+    const filter = {
       kinds: [BIFROST_EVENT_KIND],
-      authors
-    };
+      authors,
+      '#p': [this.localPubkey32]
+    } as Filter;
 
     this.relaySubscription = this.pool.subscribeMany(this.activeRelays, filter, {
       onevent: (event: Event) => {
-        const sender = this.xonlyToPeer33.get(event.pubkey.toLowerCase());
+        const sender = this.xonlyToPeer32.get(event.pubkey.toLowerCase());
         if (sender) {
           this.peerLastSeenAt.set(sender, event.created_at);
         }
 
         try {
           this.runtime?.handle_inbound_event(JSON.stringify(event));
-          this.pumpRuntime(nowUnixSecs());
+          this.pumpRuntime(Date.now());
         } catch (error) {
           this.emit('message', {
             tag: '/runtime/inbound-error',
@@ -650,11 +780,11 @@ class BrowserBridgeNode implements NodeWithEvents {
     });
   }
 
-  private pumpRuntime(now: number) {
+  private pumpRuntime(nowMs: number) {
     if (!this.runtime) return;
 
     try {
-      this.runtime.tick(now);
+      this.runtime.tick(nowMs);
 
       const outboundRaw = this.runtime.drain_outbound_events_json();
       const outboundEvents = JSON.parse(outboundRaw) as unknown;
@@ -724,6 +854,37 @@ function isBrowserBridgeNode(node: NodeWithEvents): node is BrowserBridgeNode {
     typeof (node as BrowserBridgeNode).shutdown === 'function' &&
     typeof (node as BrowserBridgeNode).fetchPeers === 'function'
   );
+}
+
+export async function decodeOnboardingProfile(
+  value: string,
+  password: string
+): Promise<DecodedOnboardingProfile> {
+  const runtime = await createWasmBridgeRuntime();
+  const decodedRaw = runtime.decode_onboarding_package_json_with_password(
+    value.trim(),
+    password
+  );
+  const decoded = JSON.parse(decodedRaw) as Record<string, unknown>;
+  const publicKey = decoded.share_pubkey32;
+  const peerPubkey = decoded.peer_pk_xonly;
+  const relays = decoded.relays;
+
+  if (typeof publicKey !== 'string' || publicKey.length !== 64) {
+    throw new Error('Decoded onboarding payload is missing a valid share pubkey');
+  }
+
+  if (typeof peerPubkey !== 'string' || peerPubkey.length !== 64) {
+    throw new Error('Decoded onboarding payload is missing a valid peer pubkey');
+  }
+
+  return {
+    publicKey: publicKey.toLowerCase(),
+    peerPubkey: peerPubkey.toLowerCase(),
+    relays: Array.isArray(relays)
+      ? relays.filter((relay): relay is string => typeof relay === 'string')
+      : []
+  };
 }
 
 export function validateOnboardCredential(value: string): ValidationResult {
@@ -838,4 +999,25 @@ export function detachEvent(
   } catch (error) {
     console.warn(`Failed to detach event ${event}`, error);
   }
+}
+
+export function getPublicKeyFromNode(node: NodeWithEvents): string {
+  if (!isBrowserBridgeNode(node) || typeof node.getPublicKey !== 'function') {
+    throw new Error('Unsupported signer node implementation');
+  }
+  return node.getPublicKey();
+}
+
+export function getRuntimeSnapshot(node: NodeWithEvents): unknown {
+  if (!isBrowserBridgeNode(node) || typeof node.snapshotRuntimeState !== 'function') {
+    throw new Error('Unsupported signer node implementation');
+  }
+  return node.snapshotRuntimeState();
+}
+
+export function getRuntimeStatus(node: NodeWithEvents): unknown {
+  if (!isBrowserBridgeNode(node) || typeof node.runtimeStatus !== 'function') {
+    throw new Error('Unsupported signer node implementation');
+  }
+  return node.runtimeStatus();
 }

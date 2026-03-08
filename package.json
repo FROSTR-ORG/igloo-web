@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "build:bridge-wasm": "./scripts/build-bridge-wasm.sh",
     "test:int": "vitest run tests/int",
-    "test:e2e": "playwright test",
+    "test:e2e": "npm --prefix ../../test run test:e2e:igloo-web",
     "test:ci": "npm run build:bridge-wasm && npm run test:int && npm run test:e2e && npm run build",
     "preview": "vite preview"
   },

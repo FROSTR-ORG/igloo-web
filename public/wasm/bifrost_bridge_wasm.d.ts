@@ -4,7 +4,7 @@
 export class WasmBridgeRuntime {
     free(): void;
     [Symbol.dispose](): void;
-    decode_onboarding_package_json(value: string): string;
+    decode_onboarding_package_json_with_password(value: string, password: string): string;
     drain_completions_json(): string;
     drain_failures_json(): string;
     drain_outbound_events_json(): string;
@@ -17,7 +17,7 @@ export class WasmBridgeRuntime {
     set_policy(policy_json: string): void;
     snapshot_state_json(): string;
     status_json(): string;
-    tick(now_unix_secs: bigint): void;
+    tick(now_unix_ms: bigint): void;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -25,7 +25,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_wasmbridgeruntime_free: (a: number, b: number) => void;
-    readonly wasmbridgeruntime_decode_onboarding_package_json: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly wasmbridgeruntime_decode_onboarding_package_json_with_password: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly wasmbridgeruntime_drain_completions_json: (a: number) => [number, number, number, number];
     readonly wasmbridgeruntime_drain_failures_json: (a: number) => [number, number, number, number];
     readonly wasmbridgeruntime_drain_outbound_events_json: (a: number) => [number, number, number, number];
